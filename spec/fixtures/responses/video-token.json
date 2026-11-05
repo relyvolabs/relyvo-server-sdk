@@ -1,0 +1,9 @@
+{
+  "server_url": "wss://rtc.example.com",
+  "token": "eyJhbGciOiJIUzI1NiJ9.fake-livekit-token.signature",
+  "room_name": "support-42",
+  "participant_identity": "user_7",
+  "expires_at": "2026-01-01T00:15:00Z",
+  "mode": "video",
+  "meter_code": "participant_seconds"
+}

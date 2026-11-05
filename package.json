@@ -1,0 +1,15 @@
+{
+  "name": "relyvo-server-sdk-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "pnpm -C sdk-ts run build",
+    "typecheck": "pnpm -C sdk-ts run typecheck",
+    "test": "pnpm -C sdk-ts test",
+    "test:go": "cd sdk-go && go test ./...",
+    "pack:check": "pnpm -C sdk-ts run pack:check"
+  }
+}

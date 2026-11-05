@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "livekit_not_configured",
+    "message": "LiveKit is not configured on this deployment."
+  },
+  "request_id": "req_fixture_0003"
+}

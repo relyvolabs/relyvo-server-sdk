@@ -1,0 +1,1145 @@
+openapi: 3.0.3
+info:
+  title: Relyvo Chat API
+  version: 1.0.0
+  description: |
+    Relyvo Chat is a multi-tenant, project-scoped realtime messaging data plane.
+    Relyvo API remains the control plane: it owns organizations, projects,
+    project credentials and billing. This service owns chat users, channels,
+    membership, messages, read state, realtime credentials and usage events.
+
+    ## Authentication models
+
+    | Credential | Header | Used for |
+    |---|---|---|
+    | Project API key | `Authorization: Bearer <api_key>` | Server-to-server identity management (`/users`, token minting) |
+    | Chat user token | `Authorization: Bearer <jwt>` | End-user messaging, realtime credentials, attachments |
+    | Developer token | `Authorization: Bearer dev_<token>` + `X-Relyvo-Project-ID` | Dashboard/Playground acting inside one project |
+
+    Server-side credentials acting on behalf of an end user must send
+    `X-Relyvo-Chat-User-ID` (internal chat user id or `external_user_id`). The
+    header is validated against the credential's own project and can never
+    reference another tenant.
+
+    ## Idempotent message creation
+
+    Send `client_message_id`. Replaying the same value in the same channel with
+    the same sender returns `200` with `created: false` and the original message;
+    it never creates a second message, realtime event, or billable usage event.
+
+    ## Ordering and reconciliation
+
+    Messages carry a gap-free `channel_seq` allocated per channel inside the
+    write transaction. Realtime delivery is at-least-once and may be out of
+    order; clients must deduplicate by `/message/id` and reconcile gaps by
+    fetching history with `after=<cursor>` (ascending) or `cursor=<cursor>`
+    (descending). PostgreSQL is authoritative; realtime history is only a cache.
+
+    ## Rate limits
+
+    Requests are rate limited per IP and message writes per user per minute.
+    Exceeding a limit returns `429` with `details.limit`,
+    `details.window_seconds`, `details.retry_after_seconds` and a `Retry-After`
+    header.
+servers:
+  - url: http://localhost:8081
+    description: Local Docker Compose stack (Relyvo API owns 8080)
+security:
+  - userToken: []
+tags:
+  - name: Health
+  - name: Users
+  - name: Channels
+  - name: Members
+  - name: Messages
+  - name: Read state
+  - name: Realtime
+  - name: Attachments
+  - name: Meetings
+
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200": { description: Process is alive }
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Verifies PostgreSQL, migration state, Redis and NATS where configured.
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ready }
+                  checks:
+                    type: object
+                    additionalProperties: { type: string }
+        "503":
+          description: At least one dependency is unavailable
+  /v1/openapi.yaml:
+    get:
+      tags: [Health]
+      summary: This document
+      security: []
+      responses:
+        "200": { description: OpenAPI YAML }
+
+  /v1/chat/users:
+    post:
+      tags: [Users]
+      summary: Create or update a chat user
+      description: Requires a project credential or developer token. Never callable with an end-user token.
+      security:
+        - projectKey: []
+        - developerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_user_id]
+              properties:
+                external_user_id:
+                  type: string
+                  maxLength: 255
+                  description: Application-owned identifier, unique per project.
+                display_name: { type: string, maxLength: 200 }
+                avatar_url: { type: string, maxLength: 2048 }
+                metadata:
+                  type: object
+                  additionalProperties: true
+                  description: Small JSON object (default limit 4 KiB).
+            examples:
+              register:
+                value:
+                  external_user_id: user_8f21
+                  display_name: Ada Lovelace
+      responses:
+        "200": { $ref: "#/components/responses/ChatUser" }
+        "201": { $ref: "#/components/responses/ChatUser" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/chat/users/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      tags: [Users]
+      summary: Get a chat user in the credential's project
+      security:
+        - projectKey: []
+        - developerToken: []
+      responses:
+        "200":
+          description: Chat user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserData" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Users]
+      summary: Update a chat user profile
+      security:
+        - projectKey: []
+        - developerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 200 }
+                avatar_url: { type: string, maxLength: 2048 }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Updated chat user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserData" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/chat/users/{userID}/tokens:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      tags: [Users]
+      summary: Issue a short-lived end-user token
+      description: |
+        Called by an authorized application backend, never by a browser or mobile
+        client holding a project secret. The token is scoped to one project and
+        one chat user and carries only `chat.user`. Requested lifetimes are
+        clamped to the server-configured maximum.
+      security:
+        - projectKey: []
+        - developerToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttl_seconds: { type: integer, minimum: 1, maximum: 86400 }
+      responses:
+        "201":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token: { type: string }
+                      token_type: { type: string, example: Bearer }
+                      scope: { type: string, example: chat.user }
+                      expires_at: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/chat/channels:
+    post:
+      tags: [Channels]
+      summary: Create a channel
+      description: |
+        * `direct` requires `other_user_id`; the pair is deduplicated deterministically and an existing channel is returned with `200` and `created: false`.
+        * `group` requires `name`; the creator becomes owner.
+        * `public` requires the project policy to allow public channels; members may self-join.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [direct, group, public] }
+                name: { type: string, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                metadata: { type: object, additionalProperties: true }
+                member_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+                other_user_id:
+                  type: string
+                  format: uuid
+                  description: Peer chat user id for direct channels.
+            examples:
+              direct:
+                value: { type: direct, other_user_id: 3f4d5c1e-8f6b-4a3e-9b7e-2a1c9d8e7f60 }
+              group:
+                value: { type: group, name: Support, member_ids: [3f4d5c1e-8f6b-4a3e-9b7e-2a1c9d8e7f60] }
+      responses:
+        "200":
+          description: Existing direct channel returned (idempotent)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelEnvelope" }
+        "201":
+          description: Channel created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [Channels]
+      summary: List the caller's channels
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Channel page, newest activity first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelPage" }
+
+  /v1/chat/channels/{channelID}:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    get:
+      tags: [Channels]
+      summary: Get a channel
+      responses:
+        "200":
+          description: Channel with the caller's role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelEnvelope" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Channels]
+      summary: Update channel metadata
+      description: Requires the `owner` or `admin` channel role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Updated channel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChannelEnvelope" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Channels]
+      summary: Delete a channel
+      description: Requires the `owner` role. History is soft-deleted, memberships are closed, and realtime subscriptions stop receiving events.
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/chat/channels/{channelID}/members:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    post:
+      tags: [Members]
+      summary: Add a channel member
+      description: Owners and admins may add members. A plain member may add only themselves, and only to a public channel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                role: { type: string, enum: [admin, member], default: member }
+      responses:
+        "200":
+          description: Membership already active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberEnvelope" }
+        "201":
+          description: Member added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberEnvelope" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [Members]
+      summary: List channel members
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Member page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberPage" }
+
+  /v1/chat/channels/{channelID}/members/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+      - $ref: "#/components/parameters/UserID"
+    delete:
+      tags: [Members]
+      summary: Remove a member, or leave
+      description: |
+        A member may remove themselves. Removing another member requires a
+        managing role and a higher role than the target. Owners cannot be removed
+        by admins. A removed user is force-unsubscribed from the realtime channel.
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/chat/channels/{channelID}/messages:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    post:
+      tags: [Messages]
+      summary: Send a message
+      description: |
+        Persists the message, its outbox event(s) and its usage event in a single
+        PostgreSQL transaction, then returns the stored message. Broker
+        availability never blocks acceptance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client_message_id:
+                  type: string
+                  maxLength: 200
+                  description: Idempotency key. Reuse it when retrying.
+                type: { type: string, enum: [text, attachment], default: text }
+                content:
+                  type: string
+                  description: Required for text messages; at most the project limit (default 8 KiB).
+                metadata: { type: object, additionalProperties: true }
+                reply_to_message_id: { type: string, format: uuid }
+                attachment_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+            examples:
+              text:
+                value:
+                  client_message_id: 2d0b2c62-3fd1-4c31-a0c2-6d6b6a3f0c11
+                  type: text
+                  content: Hello from Relyvo Chat
+      responses:
+        "201":
+          description: Message created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageEnvelope" }
+        "200":
+          description: Idempotent replay; the original message is returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [Messages]
+      summary: List channel history
+      description: |
+        Cursor pagination over `channel_seq`. Without `after`, results are newest
+        first and `next_cursor` points at older messages. With `after`, results
+        are oldest first so a reconnecting client can catch up.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: after
+          in: query
+          description: Set to any value (or `direction=after`) to return ascending results after the cursor.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Message page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessagePage" }
+
+  /v1/chat/messages/{messageID}:
+    parameters:
+      - $ref: "#/components/parameters/MessageID"
+    get:
+      tags: [Messages]
+      summary: Get a message
+      responses:
+        "200":
+          description: Message
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageSchema" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Messages]
+      summary: Edit your own message
+      description: Sender only, within the configured edit window. Moderators cannot rewrite content; they may delete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Updated message
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageSchema" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Messages]
+      summary: Delete a message
+      description: The sender may delete inside the edit window; channel admins and owners may delete any message.
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/chat/channels/{channelID}/read:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    post:
+      tags: [Read state]
+      summary: Advance the read cursor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id]
+              properties:
+                message_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated read state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ReadState" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/chat/channels/{channelID}/unread:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    get:
+      tags: [Read state]
+      summary: Unread summary
+      responses:
+        "200":
+          description: Unread state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UnreadSummary" }
+
+  /v1/chat/realtime/token:
+    post:
+      tags: [Realtime]
+      summary: Get a Centrifugo connection token
+      description: |
+        Returns a short-lived JWT for opening a Centrifugo WebSocket connection.
+        The token identifies the chat user and project. Clients then request
+        subscription credentials per channel.
+      responses:
+        "200":
+          description: Connection credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token: { type: string }
+                      ws_url: { type: string, example: "ws://localhost:8000/connection/websocket" }
+                      expires_at: { type: string, format: date-time }
+                      channel_prefix: { type: string, example: project }
+                      ttl_seconds: { type: integer }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /v1/chat/realtime/subscriptions:
+    post:
+      tags: [Realtime]
+      summary: Get subscription tokens for channels
+      description: |
+        Membership is re-checked for every channel; the request fails as a whole
+        if any channel is not authorized. Tokens are short-lived, so a removed
+        member loses access at the latest when the token expires, and immediately
+        when the service force-unsubscribes them.
+
+        Each requested channel produces **two** credentials: `kind: messages` for
+        the conversation stream and `kind: typing` for its ephemeral sibling
+        (`<channel>:typing`). Typing is published to that separate channel so it
+        stays out of recovery history, which means a client must subscribe to both
+        to receive everything. The messages entry is returned first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_ids]
+              properties:
+                channel_ids:
+                  type: array
+                  maxItems: 50
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Subscription credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      subscriptions:
+                        type: array
+                        description: Two entries per requested channel (messages, then typing).
+                        items:
+                          type: object
+                          properties:
+                            channel: { type: string, example: "project:8f1c:channel:2b9e" }
+                            kind:
+                              type: string
+                              enum: [messages, typing]
+                              description: Subscribe to every entry; typing events never arrive on the messages channel.
+                            token: { type: string }
+                            expires_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/chat/channels/{channelID}/typing:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    post:
+      tags: [Realtime]
+      summary: Publish an ephemeral typing indicator
+      description: Never persisted, never metered. Throttled per user per channel; a suppressed event still returns 202.
+      responses:
+        "202": { description: Accepted or throttled }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/chat/channels/{channelID}/presence:
+    parameters:
+      - $ref: "#/components/parameters/ChannelID"
+    get:
+      tags: [Realtime]
+      summary: Channel presence
+      description: Online presence derived from active Centrifugo connections. Multi-device users appear once per connection.
+      responses:
+        "200":
+          description: Presence list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      channel_id: { type: string, format: uuid }
+                      presence:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            client_id: { type: string }
+                            user_id: { type: string }
+                            info: { type: object, additionalProperties: true }
+
+  /v1/chat/attachments/upload:
+    post:
+      tags: [Attachments]
+      summary: Prepare a direct upload
+      description: |
+        Creates pending attachment metadata and returns a short-lived presigned
+        PUT URL. Object storage must be configured, otherwise `501` is returned.
+        The client-declared MIME type is validated against a server allowlist and
+        re-verified from the stored object on completion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_name, mime_type, size_bytes]
+              properties:
+                file_name: { type: string, maxLength: 255 }
+                mime_type: { type: string, example: image/png }
+                size_bytes: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Upload prepared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attachment: { $ref: "#/components/schemas/Attachment" }
+                      upload_url: { type: string }
+                      headers: { type: object, additionalProperties: { type: string } }
+                      expires_at: { type: string, format: date-time }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /v1/chat/attachments/{attachmentID}/complete:
+    parameters:
+      - $ref: "#/components/parameters/AttachmentID"
+    post:
+      tags: [Attachments]
+      summary: Complete an upload
+      description: Verifies the object with a provider HEAD request, records the real size, and marks the attachment ready.
+      responses:
+        "200":
+          description: Ready attachment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Attachment" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/chat/attachments/{attachmentID}:
+    parameters:
+      - $ref: "#/components/parameters/AttachmentID"
+    get:
+      tags: [Attachments]
+      summary: Get a download URL
+      description: Authorized against the attachment's message channel, or against the uploader for unattached files.
+      responses:
+        "200":
+          description: Short-lived download URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attachment: { $ref: "#/components/schemas/Attachment" }
+                      download_url: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/chat/meetings/session:
+    post:
+      tags: [Meetings]
+      summary: Exchange a Relyvo Meet delegation for a chat session
+      description: |
+        Relyvo API signs a short-lived delegation after validating the meeting join
+        secret and the participant's admission. Chat verifies the signature locally,
+        then provisions the project-scoped meeting user, channel and membership
+        idempotently and returns a least-privilege chat token plus realtime
+        credentials.
+
+        No project API key is involved, so a guest can chat without ever receiving
+        a tenant credential. Replaying the same delegation (reconnect, retry)
+        converges on the same channel and user.
+
+        When the participant was removed after the delegation was signed, the
+        request is rejected with `403 forbidden`; a fresh authorization is required
+        to re-admit them.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delegation_token]
+              properties:
+                delegation_token:
+                  type: string
+                  description: HS256 token issued by Relyvo API's meeting chat session endpoint.
+      responses:
+        "200":
+          description: Chat session issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/MeetingSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /internal/v1/meetings/lifecycle:
+    post:
+      tags: [Meetings]
+      summary: Apply a control-plane meeting lifecycle notification
+      description: |
+        Called by Relyvo API, never by a client. `participant_removed` closes the
+        participant's membership and force-unsubscribes them from Centrifugo;
+        `meeting_ended` makes the channel read-only while keeping history.
+
+        Both events are idempotent. A removal whose occurrence time predates the
+        current membership is ignored, so a delayed notification cannot eject a
+        re-admitted participant.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MeetingLifecycleEvent" }
+      responses:
+        "204": { description: Applied or already in the requested state }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+components:
+  securitySchemes:
+    projectKey:
+      type: http
+      scheme: bearer
+      description: Project API key issued by Relyvo API. Server-to-server only.
+    userToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived chat user token issued by `/v1/chat/users/{userID}/tokens`.
+    developerToken:
+      type: http
+      scheme: bearer
+      description: Relyvo dashboard developer token prefixed `dev_`, plus `X-Relyvo-Project-ID`.
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Chat-Service-Token
+      description: Shared secret used by Relyvo API for meeting lifecycle notifications.
+
+  parameters:
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ChannelID:
+      name: channelID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MessageID:
+      name: messageID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AttachmentID:
+      name: attachmentID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned as `next_cursor`.
+      schema: { type: string }
+
+  responses:
+    ChatUser:
+      description: Chat user
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/UserEnvelope" }
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unauthenticated:
+      description: Missing or invalid credential
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: Not found in this project (also returned for cross-project identifiers)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: State or uniqueness conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    TooLarge:
+      description: Payload exceeds a configured limit
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotImplemented:
+      description: Feature is not configured on this deployment
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - unauthenticated
+                - forbidden
+                - not_found
+                - conflict
+                - rate_limited
+                - payload_too_large
+                - unsupported
+                - unavailable
+                - internal_error
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        external_user_id: { type: string }
+        display_name: { type: string }
+        avatar_url: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user: { $ref: "#/components/schemas/User" }
+            created: { type: boolean }
+    UserData:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/User" }
+    Channel:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        type: { type: string, enum: [direct, group, public] }
+        name: { type: string }
+        description: { type: string }
+        created_by: { type: string, format: uuid }
+        metadata: { type: object, additionalProperties: true }
+        last_message_id: { type: string, format: uuid, nullable: true }
+        last_seq: { type: integer, format: int64 }
+        max_members: { type: integer }
+        external_id:
+          type: string
+          description: Control-plane identifier of a channel it owns, such as `ch_<meeting>`.
+        source_product:
+          type: string
+          description: Owning product for externally provisioned channels (`meet`).
+        sending_enabled:
+          type: boolean
+          description: False when the owning product closed the conversation to new messages.
+        membership_role: { type: string, enum: [owner, admin, member] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ChannelEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            channel: { $ref: "#/components/schemas/Channel" }
+            created: { type: boolean }
+    ChannelPage:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/Channel" }
+            next_cursor: { type: string }
+            has_more: { type: boolean }
+    Member:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        role: { type: string, enum: [owner, admin, member] }
+        joined_at: { type: string, format: date-time }
+        muted_until: { type: string, format: date-time, nullable: true }
+        user: { $ref: "#/components/schemas/User" }
+    MemberEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            member: { $ref: "#/components/schemas/Member" }
+            added: { type: boolean }
+    MemberPage:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/Member" }
+            next_cursor: { type: string }
+            has_more: { type: boolean }
+    MessageSchema:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid }
+        sender_id: { type: string, format: uuid }
+        channel_seq: { type: integer, format: int64 }
+        client_message_id: { type: string }
+        type: { type: string, enum: [text, system, attachment] }
+        content: { type: string, description: Empty for deleted messages. }
+        metadata: { type: object, additionalProperties: true }
+        reply_to_message_id: { type: string, format: uuid, nullable: true }
+        attachment_ids:
+          type: array
+          items: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+    MessageEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            message: { $ref: "#/components/schemas/MessageSchema" }
+            created: { type: boolean }
+    MessagePage:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/MessageSchema" }
+            next_cursor: { type: string }
+            has_more: { type: boolean }
+    ReadState:
+      type: object
+      properties:
+        channel_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        last_read_message_id: { type: string, format: uuid, nullable: true }
+        last_read_seq: { type: integer, format: int64 }
+        last_read_at: { type: string, format: date-time }
+    UnreadSummary:
+      type: object
+      properties:
+        channel_id: { type: string, format: uuid }
+        last_seq: { type: integer, format: int64 }
+        last_read_seq: { type: integer, format: int64 }
+        unread_count: { type: integer, format: int64 }
+        has_unread: { type: boolean }
+    Attachment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        uploader_id: { type: string, format: uuid }
+        message_id: { type: string, format: uuid, nullable: true }
+        storage_provider: { type: string, enum: [s3] }
+        file_name: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        status: { type: string, enum: [pending, ready, attached, deleted, failed] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, nullable: true }
+    MeetingPermissions:
+      type: object
+      properties:
+        send: { type: boolean }
+        read: { type: boolean }
+    MeetingRealtime:
+      type: object
+      description: Realtime credentials scoped to the meeting channel.
+      properties:
+        token: { type: string, description: Centrifugo connection token. }
+        ws_url: { type: string }
+        expires_at: { type: string, format: date-time }
+        channel: { type: string, example: "project:8f1c:channel:2b9e" }
+        subscription_token:
+          type: string
+          description: Subscription token for this channel only; lifetime is short so removal takes effect quickly.
+        subscription_expires_at: { type: string, format: date-time }
+        typing_channel:
+          type: string
+          description: |
+            Ephemeral sibling channel that carries `chat.typing` events. Subscribe to
+            both channels; typing is never published to the conversation channel.
+        typing_subscription_token:
+          type: string
+          description: Subscription token for `typing_channel`, with the same short lifetime.
+    MeetingSession:
+      type: object
+      properties:
+        token: { type: string, description: Chat end-user token scoped to the participant. }
+        expires_at: { type: string, format: date-time }
+        chat_user: { $ref: "#/components/schemas/User" }
+        channel: { $ref: "#/components/schemas/Channel" }
+        permissions: { $ref: "#/components/schemas/MeetingPermissions" }
+        retention:
+          type: string
+          enum: [project_default, meeting, persistent]
+        realtime: { $ref: "#/components/schemas/MeetingRealtime" }
+    MeetingLifecycleEvent:
+      type: object
+      required: [event, organization_id, project_id, channel_external_id]
+      properties:
+        event: { type: string, enum: [participant_removed, meeting_ended] }
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        channel_external_id: { type: string, example: ch_mtg_abc }
+        participant_external_id:
+          type: string
+          example: "meet:mtg_abc:ptc_1"
+          description: Required for participant_removed.
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the change happened; used to ignore stale removals.

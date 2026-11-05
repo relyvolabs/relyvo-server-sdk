@@ -1,0 +1,8 @@
+packages:
+  - "sdk-ts"
+  - "examples/ts"
+
+# esbuild ships a native binary built by a postinstall script. pnpm 10 refuses to
+# run it unless it is approved, and without it tsup cannot bundle.
+onlyBuiltDependencies:
+  - esbuild

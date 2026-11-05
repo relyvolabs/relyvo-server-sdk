@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "chat_disabled",
+    "message": "Chat is not enabled for this project."
+  },
+  "request_id": "req_fixture_0004"
+}

@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "sdk-go/v*"
+      - "sdk-ts/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Verify Go module
+    if: startsWith(github.ref, 'refs/tags/sdk-go/')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk-go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Vet and test the tagged commit
+        run: |
+          go vet ./...
+          go test ./...
+
+      # There is no registry to publish to: the Go module proxy serves a tagged
+      # commit. The tag must be `sdk-go/vX.Y.Z` because the module lives in a
+      # subdirectory; a bare `vX.Y.Z` tag would not resolve.
+      - name: Confirm the tag is a module version
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            sdk-go/v*) ;;
+            *) echo "::error::Tag must look like sdk-go/vX.Y.Z"; exit 1 ;;
+          esac
+
+  npm:
+    name: Publish TypeScript package
+    if: startsWith(github.ref, 'refs/tags/sdk-ts/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm provenance.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm -C sdk-ts test
+
+      - name: Build
+        run: pnpm -C sdk-ts run build
+
+      - name: Require an npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::Add an NPM_TOKEN repository secret with publish rights before tagging sdk-ts/v*"
+            exit 1
+          fi
+
+      - name: Publish
+        working-directory: sdk-ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

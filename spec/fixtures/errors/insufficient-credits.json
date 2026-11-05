@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "insufficient_credits",
+    "message": "Not enough available credits to start a session. Top up first."
+  },
+  "request_id": "req_fixture_0002"
+}

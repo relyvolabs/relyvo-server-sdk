@@ -1,0 +1,6 @@
+{
+  "livekit": {
+    "server_url": "wss://rtc.example.com",
+    "token_ttl_seconds": 900
+  }
+}

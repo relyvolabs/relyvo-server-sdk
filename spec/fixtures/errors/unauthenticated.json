@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unauthenticated",
+    "message": "Authentication is required."
+  },
+  "request_id": "req_fixture_0001"
+}

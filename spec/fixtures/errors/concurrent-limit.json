@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "concurrent_limit",
+    "message": "Too many live sessions for this organization. Close one before starting another."
+  },
+  "request_id": "req_fixture_0005"
+}

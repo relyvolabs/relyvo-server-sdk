@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "room_name must be 1-128 chars of letters, digits, dot, dash, colon or underscore"
+  },
+  "request_id": "req_fixture_0006"
+}

@@ -1,0 +1,2673 @@
+openapi: 3.1.0
+
+info:
+  title: Relyvo Developer Platform API
+  version: 0.1.0
+  summary: Foundation API for the Relyvo dashboard.
+  description: |
+    Identity, organization, project and API key management for the Relyvo
+    dashboard.
+
+    **Scope.** Real-time media (voice, video, chat, signalling) is not
+    implemented. No endpoint in this document serves production media traffic.
+
+    **Authentication.** Browser requests use an opaque, HttpOnly session cookie
+    plus a CSRF header. Programmatic requests use an API key bearer token.
+
+    **Error shape.** Every error returns `{ "error": { "code", "message",
+    "request_id" } }`.
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.example.com
+    description: Placeholder production origin
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Organizations
+  - name: Members
+  - name: Projects
+  - name: API keys
+  - name: Meetings
+  - name: Playground
+  - name: Entitlements
+  - name: Billing
+  - name: Internal chat
+  - name: Internal metering
+  - name: Programmatic
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    const: ok
+                required: [status]
+
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Verifies the API can reach PostgreSQL.
+      security: []
+      responses:
+        "200":
+          description: Ready to serve traffic
+        "503":
+          description: Database unreachable
+
+  /v1/auth/google:
+    get:
+      tags: [Auth]
+      summary: Start Google sign-in
+      description: |
+        Redirects to Google with PKCE, a signed state value and an OIDC nonce.
+        Returns `503` when Google credentials are not configured.
+      security: []
+      responses:
+        "302":
+          description: Redirect to the Google consent screen
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Google OIDC callback
+      description: |
+        Validates state, exchanges the code and starts a session. Success
+        redirects to the dashboard; failure redirects to `/login?error=<code>`.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to the dashboard or the login page
+
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current profile
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: The signed-in profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                required: [user]
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "204":
+          description: Session revoked
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /v1/organizations:
+    get:
+      tags: [Organizations]
+      summary: List organizations visible to the caller
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Organizations the caller belongs to
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Organization"
+                required: [organizations]
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      description: The creator becomes the initial owner.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                slug: { type: string, maxLength: 64, pattern: "^[a-z0-9-]+$" }
+              required: [name, slug]
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization:
+                    $ref: "#/components/schemas/Organization"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /v1/organizations/{organizationID}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Organizations]
+      summary: Get an organization
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization:
+                    $ref: "#/components/schemas/Organization"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Organizations]
+      summary: Update organization metadata
+      description: Requires the `admin` or `owner` role.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+              required: [name]
+      responses:
+        "200":
+          description: Organization updated
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationID}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Members]
+      summary: List members
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Members of the organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Member"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationID}/members/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Members]
+      summary: Change a member role
+      description: |
+        Requires `admin` or `owner`. An organization must keep at least one
+        owner, so demoting the final owner returns `409`.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  $ref: "#/components/schemas/Role"
+              required: [role]
+      responses:
+        "204":
+          description: Role updated
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [Members]
+      summary: Remove a member
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "204":
+          description: Member removed
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects:
+    get:
+      tags: [Projects]
+      summary: List every project the caller can read
+      description: |
+        Cross-organization. The query joins organization memberships, so a project
+        the caller cannot reach is never returned.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Visible projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+                required: [projects]
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/projects/{projectID}/meetings:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      tags: [Meetings]
+      summary: Create a shareable meeting
+      description: |
+        The server derives the room name and the join URL. Organization ownership,
+        the host and the room name are never read from the request body.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMeetingRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meeting:
+                    $ref: "#/components/schemas/Meeting"
+                required: [meeting]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/InvalidRequest" }
+    get:
+      tags: [Meetings]
+      summary: List a project's meetings
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Meetings, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meetings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Meeting"
+                required: [meetings]
+
+  /v1/projects/{projectID}/playground/sessions:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      tags: [Playground]
+      summary: Start a Playground session
+      description: |
+        Always private and short-lived, whatever the request says. Reuses the meeting
+        row, admission rules and metering.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 200 }
+                mode: { type: string, enum: [video, audio] }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session:
+                    $ref: "#/components/schemas/Meeting"
+                required: [session]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/meetings/{meetingID}:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    get:
+      tags: [Meetings]
+      summary: Read meeting metadata
+      description: |
+        Public for a public meeting. A private meeting answers `404` to a caller who
+        is not a member, so the endpoint cannot be used to discover that a meeting
+        exists. `project_id` and `metadata` are only returned to an authorized view.
+      security:
+        - {}
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Safe meeting metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meeting:
+                    $ref: "#/components/schemas/Meeting"
+                required: [meeting]
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Meetings]
+      summary: Update meeting settings
+      description: Host or an organization developer and above.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 200 }
+                visibility: { type: string, enum: [public, private] }
+                max_participants: { type: integer, minimum: 1, maximum: 10000 }
+                require_approval: { type: boolean }
+                passcode: { type: string, minLength: 4, maxLength: 128 }
+                clear_passcode: { type: boolean }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meeting:
+                    $ref: "#/components/schemas/Meeting"
+                required: [meeting]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+
+  /v1/meetings/{meetingID}/join:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    post:
+      tags: [Meetings]
+      summary: Join a meeting and receive a media token
+      description: |
+        No cookie is required. Admission is decided server-side from visibility, the
+        passcode and the seat limit. When approval is required the response is `202`
+        with a `join_secret` and **no** media block.
+      security:
+        - {}
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 128 }
+                passcode: { type: string, maxLength: 128 }
+      responses:
+        "200":
+          description: Admitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResult"
+        "202":
+          description: Waiting for host approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResult"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/meetings/{meetingID}/leave:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    post:
+      tags: [Meetings]
+      summary: Record a participant departure
+      description: |
+        Application state only. Billing follows verified media events, so this call
+        cannot be used to avoid a charge, and repeating it is safe.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                participant_id: { type: string }
+                join_secret: { type: string }
+              required: [participant_id, join_secret]
+      responses:
+        "200":
+          description: Recorded (or already recorded)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant_id: { type: string }
+                  admission_status: { type: string }
+                  changed: { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/meetings/{meetingID}/participants:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    get:
+      tags: [Meetings]
+      summary: List participants
+      description: Host or an organization developer and above.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Roster
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MeetingParticipant"
+                required: [participants]
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/meetings/{meetingID}/participants/{participantID}/admission:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+      - $ref: "#/components/parameters/ParticipantID"
+    post:
+      tags: [Meetings]
+      summary: Poll admission state
+      description: |
+        The join secret is sent in the body, so it never appears in a URL or an
+        access log. Once admitted, this returns the media block.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                join_secret: { type: string }
+              required: [join_secret]
+      responses:
+        "200":
+          description: Current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResult"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { $ref: "#/components/responses/Gone" }
+
+  /v1/meetings/{meetingID}/participants/{participantID}/admit:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+      - $ref: "#/components/parameters/ParticipantID"
+    post:
+      tags: [Meetings]
+      summary: Admit a waiting participant
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Admitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant:
+                    $ref: "#/components/schemas/MeetingParticipant"
+                required: [participant]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/meetings/{meetingID}/participants/{participantID}/reject:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+      - $ref: "#/components/parameters/ParticipantID"
+    post:
+      tags: [Meetings]
+      summary: Reject a waiting participant
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant:
+                    $ref: "#/components/schemas/MeetingParticipant"
+                required: [participant]
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/meetings/{meetingID}/participants/{participantID}/remove:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+      - $ref: "#/components/parameters/ParticipantID"
+    post:
+      tags: [Meetings]
+      summary: Remove a participant
+      description: The host cannot be removed.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant:
+                    $ref: "#/components/schemas/MeetingParticipant"
+                required: [participant]
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/meetings/{meetingID}/end:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    post:
+      tags: [Meetings]
+      summary: End a meeting for everyone
+      description: Idempotent. A terminal meeting never returns to active.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Ended
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meeting:
+                    $ref: "#/components/schemas/Meeting"
+                required: [meeting]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/playground/sessions/{sessionID}/join:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      tags: [Playground]
+      summary: Join a Playground session
+      description: Always requires membership of the owning organization.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 128 }
+      responses:
+        "200":
+          description: Admitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResult"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { $ref: "#/components/responses/Gone" }
+
+  /v1/playground/sessions/{sessionID}/leave:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      tags: [Playground]
+      summary: Leave a Playground session
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                participant_id: { type: string }
+                join_secret: { type: string }
+              required: [participant_id, join_secret]
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant_id: { type: string }
+                  changed: { type: boolean }
+
+  /v1/meetings/{meetingID}/chat/session:
+    parameters:
+      - $ref: "#/components/parameters/MeetingID"
+    post:
+      tags: [Meetings]
+      summary: Authorize an admitted participant for the meeting chat
+      description: |
+        Requires the participant's join secret. A meeting id is not a secret, so
+        possession of the link grants nothing and a wrong secret answers 404 rather
+        than confirming that the participant exists.
+
+        The response carries no chat access token: those are signed by the chat
+        service. This endpoint proves admission and reports what the participant
+        may do.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                participant_id: { type: string }
+                join_secret: { type: string }
+              required: [participant_id, join_secret]
+      responses:
+        "200":
+          description: Authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingChatSession"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/projects/{projectID}/entitlements:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Entitlements]
+      summary: Read the product entitlements of a project
+      description: |
+        A project with no entitlement row has nothing enabled. That is a valid
+        state, so it answers 200 with everything false rather than 404.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Current entitlements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entitlements:
+                    $ref: "#/components/schemas/ProjectEntitlements"
+                required: [entitlements]
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Entitlements]
+      summary: Update product entitlements
+      description: |
+        A patch: only the fields in the body change, so setting one policy value
+        cannot reset the rest.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                video_enabled: { type: boolean }
+                chat_enabled: { type: boolean }
+                allow_public_channels: { type: boolean }
+                max_message_bytes: { type: integer, minimum: 0 }
+                max_channel_members: { type: integer, minimum: 0 }
+                message_rate_per_minute: { type: integer, minimum: 0 }
+                max_attachment_bytes: { type: integer, minimum: 0 }
+                allowed_features:
+                  type: array
+                  items: { type: string }
+                chat_retention:
+                  type: string
+                  enum: [project_default, meeting, persistent]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entitlements:
+                    $ref: "#/components/schemas/ProjectEntitlements"
+                required: [entitlements]
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /internal/v1/chat/projects/authorize:
+    post:
+      tags: [Internal chat]
+      summary: Validate a project credential and return its chat policy
+      description: |
+        Service-only. The project is derived from the credential, so a caller can
+        never name a project it holds no key for. Revocation is honoured
+        immediately; there is no cache on this side.
+      security:
+        - serviceAccount: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                api_key: { type: string }
+              required: [api_key]
+      responses:
+        "200":
+          description: Authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatProjectAuthorization"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: Chat is not enabled for this project (`chat_disabled`)
+
+  /internal/v1/projects/{projectID}/chat-config:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Internal chat]
+      summary: Read a project's chat policy
+      description: |
+        Used when the caller has an end-user token and therefore no project
+        credential. Returns policy only: no secret, no credential metadata.
+      security:
+        - serviceAccount: []
+      responses:
+        "200":
+          description: Policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatConfig"
+        "403":
+          description: Chat is not enabled for this project (`chat_disabled`)
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /internal/v1/chat/developers/introspect:
+    post:
+      tags: [Internal chat]
+      summary: Validate a dashboard session for the Playground
+      description: |
+        A developer may belong to several organizations, while the contract
+        carries one `organization_id`. It is always chosen so that it owns every
+        id in `project_ids`: `X-Relyvo-Project-ID` when readable, otherwise the
+        earliest membership.
+      security:
+        - serviceAccount: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+              required: [token]
+      responses:
+        "200":
+          description: Session valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  organization_id: { type: string, format: uuid }
+                  project_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+                  name: { type: string }
+                required: [user_id, organization_id, project_ids, name]
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: The account has no project to act in (`no_project`)
+
+  /v1/organizations/{organizationID}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Projects]
+      summary: List projects
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Projects in the organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Projects]
+      summary: Create a project
+      description: Requires the `developer`, `admin` or `owner` role.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                slug: { type: string, maxLength: 64, pattern: "^[a-z0-9-]+$" }
+                description: { type: string }
+                environment:
+                  $ref: "#/components/schemas/Environment"
+              required: [name, slug]
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /v1/projects/{projectID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      summary: Get a project
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                description: { type: string }
+                environment:
+                  $ref: "#/components/schemas/Environment"
+              required: [name]
+      responses:
+        "200":
+          description: Project updated
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectID}/archive:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      tags: [Projects]
+      summary: Archive a project
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Project archived
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectID}/api-keys:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [API keys]
+      summary: List API key metadata
+      description: Secrets are never returned by list endpoints.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: API keys for the project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/APIKey"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [API keys]
+      summary: Create an API key
+      description: |
+        The plaintext secret is returned **once** in this response. It cannot be
+        retrieved again.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                environment:
+                  $ref: "#/components/schemas/Environment"
+                scopes:
+                  type: array
+                  items: { type: string }
+                expires_in:
+                  type: string
+                  description: Go duration string, e.g. `720h`
+              required: [name]
+      responses:
+        "201":
+          description: Key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/IssuedAPIKey"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /v1/projects/{projectID}/api-keys/{keyID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - name: keyID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [API keys]
+      summary: Get API key metadata
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Key metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/APIKey"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectID}/api-keys/{keyID}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - name: keyID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [API keys]
+      summary: Revoke an API key
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Key revoked
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectID}/api-keys/{keyID}/rotate:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - name: keyID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [API keys]
+      summary: Rotate an API key
+      description: |
+        Issues a replacement and revokes the previous key. The new plaintext
+        secret is returned once.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "201":
+          description: Replacement key created and old key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/IssuedAPIKey"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/api/whoami:
+    get:
+      tags: [Programmatic]
+      summary: Resolve the calling API key
+      description: |
+        Authenticates with `Authorization: Bearer rv_<keyID>_<secret>`. A valid
+        key is scoped to exactly one project.
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: The key's project context
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /v1/api/video/config:
+    get:
+      tags: [Programmatic]
+      summary: Public media connection details for the key's project
+      description: |
+        Returns the signalling URL and participant token lifetime. This is the
+        same object a browser receives; it contains no secret, so it is only
+        useful together with a token minted for the same project.
+
+        The project is read from the API key, never from a path parameter.
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Public connection details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [livekit]
+                properties:
+                  livekit:
+                    type: object
+                    required: [server_url, token_ttl_seconds]
+                    properties:
+                      server_url:
+                        type: string
+                        format: uri
+                        description: Browser-facing signalling URL.
+                        example: wss://rtc.example.com
+                      token_ttl_seconds:
+                        type: integer
+                        example: 900
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          description: This deployment has no media server configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+                example:
+                  error:
+                    code: livekit_not_configured
+                    message: LiveKit is not configured on this deployment.
+
+  /v1/api/video/tokens:
+    post:
+      tags: [Programmatic]
+      summary: Mint a participant token for the key's project
+      description: |
+        The server-SDK surface: a trusted backend mints a media credential for its
+        own user without a dashboard session.
+
+        The grant is chosen here and is join-only. A caller cannot request
+        `roomCreate`, `roomAdmin` or `roomList`, and cannot name a project: the
+        project comes from the API key. Issuance goes through the same reservation
+        and concurrency checks as the dashboard, so a token is only minted when the
+        organization can pay for the session.
+
+        Send `Content-Type: application/json`. The route authenticates with the
+        bearer key, so no CSRF token is involved.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room_name, participant_identity]
+              properties:
+                room_name:
+                  type: string
+                  maxLength: 128
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                participant_identity:
+                  type: string
+                  maxLength: 128
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$"
+                display_name:
+                  type: string
+                  maxLength: 128
+                mode:
+                  type: string
+                  enum: [audio, video]
+                  default: video
+      responses:
+        "200":
+          description: A signed, join-only participant token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_url, token, room_name, participant_identity, expires_at, mode, meter_code]
+                properties:
+                  server_url:
+                    type: string
+                    format: uri
+                  token:
+                    type: string
+                    description: Short-lived LiveKit JWT. Send it to the browser.
+                  room_name:
+                    type: string
+                  participant_identity:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                  mode:
+                    type: string
+                    enum: [audio, video]
+                  meter_code:
+                    type: string
+                    example: participant_seconds
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          description: The wallet cannot cover the initial reservation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "429":
+          description: Too many concurrent sessions for the organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: This deployment has no media server configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /v1/billing/packages:
+    get:
+      tags: [Billing]
+      summary: List purchasable credit packages
+      description: |
+        Only active packages are returned. `currency` filters to packages that
+        are actually priced in that currency.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: currency
+          in: query
+          schema:
+            $ref: "#/components/schemas/Currency"
+      responses:
+        "200":
+          description: Package catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  packages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CreditPackage"
+                  supported_currencies:
+                    type: array
+                    description: |
+                      Currencies the active gateway can settle. A Xendit account is
+                      bound to one currency, so this is usually a single entry.
+                    items:
+                      $ref: "#/components/schemas/Currency"
+                  provider:
+                    type: string
+                    description: Active gateway identifier.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /v1/organizations/{organizationID}/billing/wallet:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Billing]
+      summary: Read the organization credit wallet
+      description: |
+        Available credits are `balance_credits - reserved_credits`. A wallet that
+        has never been funded reports zeroes.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Wallet balances
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    $ref: "#/components/schemas/CreditWallet"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationID}/billing/ledger:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Billing]
+      summary: List immutable ledger entries
+      description: |
+        Newest first. Entries are append-only: a correction is a compensating
+        entry, never an edit.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: before
+          in: query
+          description: Cursor timestamp from `next_before`
+          schema: { type: string, format: date-time }
+        - name: before_id
+          in: query
+          description: Cursor id from `next_before_id`
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Ledger page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LedgerEntry"
+                  next_before:
+                    type: string
+                    format: date-time
+                  next_before_id:
+                    type: string
+                    format: uuid
+
+  /v1/organizations/{organizationID}/billing/usage:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Billing]
+      summary: Summarise metered usage
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Usage grouped by service, metric and project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+                  summary:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageSummary"
+
+  /v1/organizations/{organizationID}/billing/usage/events:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Billing]
+      summary: List individual usage events
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: before
+          in: query
+          schema: { type: string, format: date-time }
+        - name: service
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Usage events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageEvent"
+
+  /v1/organizations/{organizationID}/billing/payments:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      tags: [Billing]
+      summary: List payment orders
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: before
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Payment orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaymentOrder"
+
+  /v1/organizations/{organizationID}/billing/payments/{paymentID}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+      - name: paymentID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Billing]
+      summary: Get one payment order
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Payment order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/PaymentOrder"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationID}/billing/checkout:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    post:
+      tags: [Billing]
+      summary: Start a credit purchase
+      description: |
+        Requires the `admin` or `owner` role. The price and the credit grant are
+        resolved server-side from the package catalog: a client can never choose
+        its own amount.
+
+        `Idempotency-Key` is required. Replaying the same key with the same body
+        returns the original order with `replayed: true`; changing the body
+        returns `409`.
+
+        Only one `pending`/`processing` order may exist per organization. A
+        second checkout returns `409` with code `payment_in_progress` and the
+        blocking `payment`, which must be completed or cancelled first.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                package_code: { type: string, example: growth }
+                currency:
+                  $ref: "#/components/schemas/Currency"
+                payment_method: { type: string, example: qris }
+              required: [package_code, currency]
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout:
+                    $ref: "#/components/schemas/CheckoutResult"
+        "200":
+          description: Replayed existing order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout:
+                    $ref: "#/components/schemas/CheckoutResult"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /v1/organizations/{organizationID}/billing/payments/{paymentID}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+      - name: paymentID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Billing]
+      summary: Cancel an open checkout
+      description: |
+        Requires the `admin` or `owner` role. Cancelling frees the organization to
+        start a new checkout.
+
+        The provider is asked to invalidate the hosted page first. If that fails
+        the local status is left unchanged, because a locally cancelled order
+        whose payment link still works would take money for an order we believe
+        is closed.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/PaymentOrder"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/organizations/{organizationID}/billing/payments/{paymentID}/simulate:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+      - name: paymentID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Billing]
+      summary: Simulate settlement (fake provider only)
+      description: |
+        Requires the `admin` or `owner` role and only works when
+        `PAYMENT_PROVIDER=fake`. It builds a webhook body, signs it with the fake
+        provider and runs the normal verification and top-up path, so the ledger
+        entry is produced exactly as a real delivery would produce it.
+
+        No money moves and no gateway is contacted. Any other provider returns
+        `503`.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      responses:
+        "200":
+          description: Settlement processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settlement:
+                    type: object
+                    properties:
+                      status: { type: string }
+                      payment_id: { type: string, format: uuid }
+                      credits_granted: { type: integer }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/organizations/{organizationID}/billing/adjustments:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    post:
+      tags: [Billing]
+      summary: Apply a manual credit adjustment
+      description: |
+        Owner only. Requires a reason and an `Idempotency-Key`. Negative amounts
+        are rejected when they would exceed available credits. Every adjustment
+        writes an immutable ledger entry.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount_credits:
+                  type: integer
+                  description: Signed; negative debits.
+                reason: { type: string, maxLength: 500 }
+                entry_type:
+                  type: string
+                  enum: [adjustment, refund, chargeback, expiration]
+              required: [amount_credits, reason]
+      responses:
+        "201":
+          description: Adjustment recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entry:
+                    $ref: "#/components/schemas/LedgerEntry"
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/webhooks/payments/{provider}:
+    post:
+      tags: [Billing]
+      summary: Payment provider webhook
+      description: |
+        Authenticated by the provider signature, not by a session or CSRF token.
+        The payload is verified against the raw body before anything is trusted,
+        then the amount and currency are checked against the stored order.
+
+        Duplicate deliveries are acknowledged with `{"status":"duplicate"}` and
+        never grant credits twice. An unpaid outcome (`expired`, `failed`) closes
+        the order so the dashboard stops offering an unpayable link. A browser
+        redirect is never treated as proof of payment.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, example: fake }
+      responses:
+        "200":
+          description: Delivery processed, ignored or already handled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [processed, duplicate, ignored, already_paid, already_credited,
+                           expired, failed, already_expired, already_failed,
+                           unknown_reference, amount_mismatch]
+                  payment_id: { type: string, format: uuid }
+                  credits_granted: { type: integer }
+        "401":
+          description: Signature could not be verified
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /internal/v1/usage/events:
+    post:
+      tags: [Internal metering]
+      summary: Record a metered usage event
+      description: |
+        Service-to-service only. Requires `X-Service-Token`; a browser session is
+        never sufficient. The caller reports the measured quantity, never the
+        credit cost: pricing is resolved server-side from the versioned rule.
+
+        A repeated `(source_service, source_event_id)` is deduplicated and never
+        charged twice.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id: { type: string, format: uuid }
+                source_service: { type: string, example: media-gateway }
+                source_event_id: { type: string, example: evt_01 }
+                service_code: { type: string, example: voice }
+                metric_code: { type: string, example: participant_seconds }
+                quantity: { type: integer, example: 180 }
+                occurred_at: { type: string, format: date-time }
+                project_id: { type: string, format: uuid }
+                api_key_id: { type: string, format: uuid }
+                metadata: { type: object }
+              required: [organization_id, source_service, source_event_id, service_code, metric_code, quantity]
+      responses:
+        "201":
+          description: Usage recorded and charged
+        "200":
+          description: Duplicate event, nothing charged again
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+        "401":
+          description: Missing or invalid service token
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /internal/v1/usage/reservations:
+    post:
+      tags: [Internal metering]
+      summary: Reserve credits for a session
+      description: |
+        Holds credits before a real-time session starts so concurrent sessions
+        cannot overspend the wallet. Reusing `idempotency_key` returns the
+        existing hold.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id: { type: string, format: uuid }
+                source_service: { type: string }
+                session_id: { type: string }
+                service_code: { type: string }
+                metric_code: { type: string }
+                quantity: { type: integer }
+                ttl_seconds: { type: integer, maximum: 86400 }
+                idempotency_key: { type: string }
+              required: [organization_id, source_service, session_id, service_code, metric_code, idempotency_key]
+      responses:
+        "201":
+          description: Hold placed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation:
+                    $ref: "#/components/schemas/UsageReservation"
+        "200":
+          description: Existing hold returned
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+
+  /internal/v1/usage/reservations/{id}/capture:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Internal metering]
+      summary: Capture a reservation
+      description: |
+        Charges the measured quantity and releases the hold in one transaction.
+        Capturing above the authorised hold is rejected; retrying a captured
+        reservation is a no-op.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id: { type: string, format: uuid }
+                quantity: { type: integer }
+                source_service: { type: string }
+              required: [organization_id]
+      responses:
+        "200":
+          description: Reservation captured
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation:
+                    $ref: "#/components/schemas/UsageReservation"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+
+  /internal/v1/usage/reservations/{id}/release:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Internal metering]
+      summary: Release a reservation
+      description: Returns held credits without charging.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id: { type: string, format: uuid }
+              required: [organization_id]
+      responses:
+        "200":
+          description: Reservation released
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  securitySchemes:
+    serviceAccount:
+      type: http
+      scheme: bearer
+      description: |
+        Internal service credential, created with `cmd/service-account`. The token
+        is a 256-bit secret; only its SHA-256 digest is stored. Each account holds
+        explicit scopes, so a credential is not authorization for every project.
+
+        The legacy shared `INTERNAL_SERVICE_TOKEN` is also accepted
+        (`Authorization: Bearer` or `X-Service-Token`) with its original reach.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: relyvo_session
+      description: |
+        Opaque session cookie. `HttpOnly`, `Secure` in production,
+        `SameSite=Lax` by default.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: |
+        Double-submit token. Read the readable `relyvo_csrf` cookie and echo it
+        on every state-changing request.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: rv_<keyID>_<secret>
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+      description: |
+        Shared secret for trusted internal services. When
+        `INTERNAL_SERVICE_TOKEN` is unset the internal routes answer 503 rather
+        than accepting anyone.
+
+  parameters:
+    OrganizationID:
+      name: organizationID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MeetingID:
+      name: meetingID
+      in: path
+      required: true
+      description: Public meeting identifier, for example `mtg_abcdefgh…`.
+      schema:
+        type: string
+        pattern: "^[a-z]{2,4}_[a-z2-7]{8,64}$"
+        example: mtg_u4rukjp6dgxcxjtbkdgm2aq2yi
+    SessionID:
+      name: sessionID
+      in: path
+      required: true
+      description: Public Playground session identifier, prefixed `pg_`.
+      schema:
+        type: string
+        pattern: "^[a-z]{2,4}_[a-z2-7]{8,64}$"
+        example: pg_u4rukjp6dgxcxjtbkdgm2aq2yi
+    ParticipantID:
+      name: participantID
+      in: path
+      required: true
+      description: Public participant identifier, prefixed `p_`.
+      schema:
+        type: string
+        example: p_abcdefgh
+
+  responses:
+    InvalidRequest:
+      description: The payload failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthenticated:
+      description: Missing, expired or revoked credentials
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Authenticated but the role is insufficient
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: |
+        The resource does not exist **or** the caller is not a member of its
+        organization. The two are intentionally indistinguishable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: The request conflicts with current state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ServiceUnavailable:
+      description: The feature is not configured on this deployment
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    PaymentRequired:
+      description: Not enough available credits for this operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Gone:
+      description: |
+        The meeting ended, expired or was cancelled. Codes: `meeting_not_joinable`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unavailable:
+      description: |
+        Real-time media is not configured, or token issuance failed. Code:
+        `media_unavailable`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    Currency:
+      type: string
+      enum: [IDR, USD]
+      description: |
+        IDR has 1 minor unit per rupiah; USD has 100 (cents). Amounts are always
+        integers in minor units.
+
+    CreditWallet:
+      type: object
+      properties:
+        balance_credits: { type: integer }
+        reserved_credits: { type: integer }
+        available_credits: { type: integer }
+        is_low_balance: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [balance_credits, reserved_credits, available_credits, is_low_balance]
+
+    CreditPackage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        credits: { type: integer }
+        is_active: { type: boolean }
+        sort_order: { type: integer }
+        prices:
+          type: array
+          items:
+            type: object
+            properties:
+              currency:
+                $ref: "#/components/schemas/Currency"
+              amount_minor: { type: integer }
+            required: [currency, amount_minor]
+      required: [id, code, name, credits, is_active, prices]
+
+    LedgerEntry:
+      type: object
+      description: Append-only. Corrections are new entries, never edits.
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        entry_type:
+          type: string
+          enum: [topup, usage, refund, adjustment, expiration, chargeback]
+        amount_credits:
+          type: integer
+          description: Signed; negative entries spend credits.
+        balance_after_credits: { type: integer }
+        source_type: { type: string }
+        source_id: { type: string }
+        idempotency_key: { type: string }
+        description: { type: string }
+        metadata: { type: object }
+        created_at: { type: string, format: date-time }
+      required: [id, entry_type, amount_credits, balance_after_credits, created_at]
+
+    UsageSummary:
+      type: object
+      properties:
+        service_code: { type: string }
+        metric_code: { type: string }
+        project_id: { type: [string, "null"], format: uuid }
+        event_count: { type: integer }
+        quantity: { type: integer }
+        charged_credits: { type: integer }
+
+    UsageEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        source_service: { type: string }
+        source_event_id: { type: string }
+        project_id: { type: [string, "null"], format: uuid }
+        service_code: { type: string }
+        metric_code: { type: string }
+        quantity: { type: integer }
+        unit_name: { type: string }
+        pricing_version: { type: string }
+        charged_credits: { type: integer }
+        occurred_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+
+    UsageReservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        session_id: { type: string }
+        service_code: { type: string }
+        metric_code: { type: string }
+        reserved_credits: { type: integer }
+        captured_credits: { type: integer }
+        state:
+          type: string
+          enum: [reserved, captured, released, expired]
+        expires_at: { type: string, format: date-time }
+        captured_at: { type: [string, "null"], format: date-time }
+        released_at: { type: [string, "null"], format: date-time }
+
+    PaymentOrder:
+      type: object
+      description: |
+        Amounts and the credit grant are snapshotted at creation, so later
+        package price changes never alter an existing order.
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        package_code: { type: string }
+        package_name: { type: string }
+        provider: { type: string }
+        merchant_reference: { type: string }
+        checkout_url: { type: string }
+        status:
+          type: string
+          enum: [pending, processing, paid, failed, expired, cancelled, refunded]
+        charged_currency:
+          $ref: "#/components/schemas/Currency"
+        charged_amount_minor: { type: integer }
+        credits_to_grant: { type: integer }
+        settlement_currency: { type: string }
+        settlement_amount_minor: { type: integer }
+        fx_rate: { type: string }
+        fx_source: { type: string }
+        payment_method: { type: string }
+        expires_at: { type: [string, "null"], format: date-time }
+        paid_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    CheckoutResult:
+      type: object
+      properties:
+        payment_id: { type: string, format: uuid }
+        merchant_reference: { type: string }
+        status:
+          type: string
+          enum: [pending, processing, paid, failed, expired, cancelled, refunded]
+        charged_currency:
+          $ref: "#/components/schemas/Currency"
+        charged_amount_minor: { type: integer }
+        credits_to_grant: { type: integer }
+        package_code: { type: string }
+        provider: { type: string }
+        checkout_url: { type: string }
+        expires_at: { type: string, format: date-time }
+        replayed:
+          type: boolean
+          description: True when an existing order was returned for a reused key.
+
+    Role:
+      type: string
+      enum: [owner, admin, developer, viewer]
+
+    Environment:
+      type: string
+      enum: [development, staging, production]
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+          required: [code, message]
+      required: [error]
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        email_verified_at: { type: [string, "null"], format: date-time }
+        name: { type: string }
+        avatar_url: { type: [string, "null"] }
+        status: { type: string, enum: [active, disabled] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, email, name, status, created_at, updated_at]
+
+    Organization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        role:
+          type: string
+          description: The caller's role, present on responses that resolve it.
+      required: [id, name, slug, created_by, created_at, updated_at]
+
+    Member:
+      type: object
+      properties:
+        organization_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        role:
+          $ref: "#/components/schemas/Role"
+        email: { type: string, format: email }
+        name: { type: string }
+      required: [organization_id, user_id, role, email, name]
+
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        description: { type: [string, "null"] }
+        environment:
+          $ref: "#/components/schemas/Environment"
+        status: { type: string, enum: [active, archived] }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        archived_at: { type: [string, "null"], format: date-time }
+      required: [id, organization_id, name, slug, environment, status]
+
+    APIKey:
+      type: object
+      description: Key metadata. Secret material is never included.
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        name: { type: string }
+        key_id: { type: string }
+        masked_key: { type: string }
+        environment:
+          $ref: "#/components/schemas/Environment"
+        scopes:
+          type: array
+          items: { type: string }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+        rotated_from: { type: [string, "null"], format: uuid }
+      required: [id, project_id, name, key_id, environment, scopes, created_at]
+
+    IssuedAPIKey:
+      type: object
+      description: |
+        Returned only on creation and rotation. `secret` is the full plaintext
+        credential and cannot be retrieved again.
+      properties:
+        key:
+          $ref: "#/components/schemas/APIKey"
+        secret:
+          type: string
+          example: rv_abcdefgh1234_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        warning:
+          type: string
+      required: [key, secret, warning]
+
+    Meeting:
+      type: object
+      description: |
+        Safe meeting metadata. `project_id` and `metadata` are only present in an
+        authorized view; a public caller never receives them. The room name and all
+        internal identifiers are omitted.
+      properties:
+        meeting_id:
+          type: string
+          example: mtg_u4rukjp6dgxcxjtbkdgm2aq2yi
+        kind:
+          type: string
+          enum: [meeting, playground]
+        title:
+          type: string
+        status:
+          type: string
+          enum: [scheduled, active, ended, expired, cancelled]
+        visibility:
+          type: string
+          enum: [public, private]
+        mode:
+          type: string
+          enum: [video, audio]
+        require_approval:
+          type: boolean
+        max_participants:
+          type: integer
+          nullable: true
+        scheduled_start_at:
+          type: string
+          format: date-time
+          nullable: true
+        scheduled_end_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        join_url:
+          type: string
+          format: uri
+          description: Built from trusted server configuration, never from a request header.
+        project_id:
+          type: string
+          format: uuid
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [meeting_id, kind, title, status, visibility, mode, created_at, updated_at]
+
+    CreateMeetingRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        visibility: { type: string, enum: [public, private], default: private }
+        mode: { type: string, enum: [video, audio], default: video }
+        expires_at: { type: string, format: date-time }
+        scheduled_start_at: { type: string, format: date-time }
+        scheduled_end_at: { type: string, format: date-time }
+        max_participants: { type: integer, minimum: 1, maximum: 10000 }
+        require_approval: { type: boolean, default: false }
+        passcode: { type: string, minLength: 4, maxLength: 128 }
+        metadata: { type: object, additionalProperties: true }
+      required: [title]
+
+    JoinResult:
+      type: object
+      description: |
+        The join secret is returned exactly once, at join. A later admission poll
+        omits it. The credential is nested under `media` so it is hard to log by
+        accident.
+      properties:
+        meeting_id:
+          type: string
+        participant_id:
+          type: string
+        participant_role:
+          type: string
+          enum: [host, participant]
+        admission_status:
+          type: string
+          enum: [waiting, admitted, rejected, left]
+        waiting:
+          type: boolean
+        join_secret:
+          type: string
+        admission_note:
+          type: string
+        media:
+          type: object
+          properties:
+            server_url:
+              type: string
+              description: Browser-facing signalling URL.
+            participant_token:
+              type: string
+              description: Short-lived, join-only token. Never logged.
+            expires_at:
+              type: string
+              format: date-time
+            identity:
+              type: string
+            can_publish: { type: boolean }
+            can_subscribe: { type: boolean }
+
+    MeetingParticipant:
+      type: object
+      properties:
+        participant_id: { type: string }
+        display_name: { type: string }
+        participant_role:
+          type: string
+          enum: [host, participant]
+        admission_status:
+          type: string
+          enum: [waiting, admitted, rejected, left]
+        admitted_at: { type: string, format: date-time, nullable: true }
+        joined_at: { type: string, format: date-time, nullable: true }
+        left_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+      required: [participant_id, participant_role, admission_status, created_at]
+
+    MeetingChatSession:
+      type: object
+      description: |
+        Admission proof plus the derived chat identity. Deliberately carries no
+        chat access token: those are signed by the chat service. `delegation_token`
+        is the short-lived authorization the client exchanges with Relyvo Chat.
+      properties:
+        project_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        channel_id:
+          type: string
+          description: Derived from the meeting, so a retried bootstrap resolves the same channel.
+        chat_user_id:
+          type: string
+          description: Project- and meeting-scoped external user id for the chat service.
+        display_name: { type: string }
+        participant_id: { type: string }
+        participant_role:
+          type: string
+          enum: [host, participant]
+        meeting_status:
+          type: string
+          enum: [scheduled, active, ended, expired, cancelled]
+        retention:
+          type: string
+          enum: [project_default, meeting, persistent]
+        permissions:
+          type: object
+          properties:
+            send: { type: boolean }
+            read: { type: boolean }
+          required: [send, read]
+        delegation_token:
+          type: string
+          description: |
+            Short-lived HS256 authorization signed by Relyvo API. Present only when
+            the chat integration is configured. It is already exchanged server-side
+            into `credentials`; it stays in the response so a client can retry the
+            exchange itself if that call failed.
+        credentials:
+          type: object
+          description: |
+            Chat credentials obtained by exchanging the delegation. Absent when the
+            exchange failed (`credentials_unavailable: true`); the panel then reports
+            chat as unavailable instead of the meeting failing.
+          properties:
+            user_token:
+              type: string
+              description: "Scoped chat end-user token. Send it as `Authorization: Bearer`."
+            expires_at: { type: string, format: date-time }
+            realtime:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: Centrifugo connection token.
+                ws_url: { type: string }
+                channel:
+                  type: string
+                  description: "Conversation stream channel, for example `project:{id}:channel:{cid}`."
+                subscription_token:
+                  type: string
+                  description: Subscription token for `channel`.
+                expires_at: { type: string, format: date-time }
+                typing_channel:
+                  type: string
+                  description: |
+                    Ephemeral sibling channel carrying `chat.typing`. Typing is never
+                    published to `channel`, so clients must subscribe to both.
+                typing_subscription_token:
+                  type: string
+                  description: Subscription token for `typing_channel`.
+          required: [user_token, realtime]
+        credentials_unavailable:
+          type: boolean
+          description: Set when the delegation could not be exchanged (chat unreachable).
+        expires_at:
+          type: string
+          format: date-time
+        next_step: { type: string }
+      required: [project_id, organization_id, channel_id, chat_user_id, participant_id, permissions]
+
+    ProjectEntitlements:
+      type: object
+      properties:
+        project_id: { type: string, format: uuid }
+        video_enabled: { type: boolean }
+        chat_enabled: { type: boolean }
+        allow_public_channels: { type: boolean }
+        max_message_bytes: { type: integer }
+        max_channel_members: { type: integer }
+        message_rate_per_minute: { type: integer }
+        max_attachment_bytes: { type: integer }
+        allowed_features:
+          type: array
+          items: { type: string }
+        chat_retention:
+          type: string
+          enum: [project_default, meeting, persistent]
+      required: [project_id, video_enabled, chat_enabled]
+
+    ChatConfig:
+      type: object
+      description: |
+        Policy as relyvo-chat decodes it. A zero value means "use the service
+        default"; the meaning belongs to the chat service, so nothing here
+        substitutes a default of its own.
+      properties:
+        chat_enabled: { type: boolean }
+        allow_public_channels: { type: boolean }
+        max_message_bytes: { type: integer }
+        max_channel_members: { type: integer }
+        message_rate_per_minute: { type: integer }
+        max_attachment_bytes: { type: integer }
+        allowed_features:
+          type: array
+          items: { type: string }
+      required: [chat_enabled]
+
+    ChatProjectAuthorization:
+      type: object
+      properties:
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        environment: { type: string }
+        api_key_id: { type: string, format: uuid }
+        scopes:
+          type: array
+          items: { type: string }
+        config:
+          $ref: "#/components/schemas/ChatConfig"
+      required: [organization_id, project_id, environment, api_key_id, scopes, config]

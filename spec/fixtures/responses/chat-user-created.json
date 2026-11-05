@@ -1,0 +1,18 @@
+{
+  "data": {
+    "user": {
+      "id": "0f5b3a7e-2c4d-4a91-9f60-5b1f0f4e6a11",
+      "organization_id": "6a0d2f54-9b3c-4c1e-8f27-1d2b3c4d5e6f",
+      "project_id": "8c1e4b62-7d5a-4f39-9a11-2e3f4a5b6c7d",
+      "external_user_id": "user_7",
+      "display_name": "Ada",
+      "avatar_url": "https://example.com/ada.png",
+      "metadata": {
+        "plan": "pro"
+      },
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "created": true
+  }
+}

@@ -1,0 +1,29 @@
+# Ignore everything not related to the project.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.pnpm-store/
+
+# Go
+*.test
+*.out
+
+# Env and secrets — an API key must never be committed.
+.env
+.env.*
+!.env.example
+
+# Build output
+bin/

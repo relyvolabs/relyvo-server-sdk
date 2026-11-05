@@ -1,0 +1,18 @@
+{
+  "name": "@relyvo/server-sdk-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal Relyvo server integration using the TypeScript SDK.",
+  "scripts": {
+    "start": "node --experimental-strip-types main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "relyvo-server-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
