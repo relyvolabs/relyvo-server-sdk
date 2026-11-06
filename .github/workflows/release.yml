@@ -83,4 +83,23 @@ jobs:
         working-directory: sdk-ts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: |
+          set +e
+          npm publish --provenance --access public 2>&1 | tee /tmp/publish.log
+          status=${PIPESTATUS[0]}
+
+          if [ "${status}" -ne 0 ]; then
+            # The log lives behind an authenticated API, so a failure that only
+            # prints to stdout is invisible to anyone without admin rights.
+            # An annotation and a job summary are readable on the public run page.
+            detail=$(tail -n 6 /tmp/publish.log | tr '\n' ' ' | cut -c1-700)
+            echo "::error title=npm publish failed::${detail}"
+            {
+              echo '### npm publish failed'
+              echo '```'
+              tail -n 40 /tmp/publish.log
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          exit "${status}"
