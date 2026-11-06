@@ -29,12 +29,22 @@
     "sdk",
     "server"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RaffyJO/relyvo-server-sdk.git",
+    "directory": "sdk-ts"
+  },
+  "homepage": "https://github.com/RaffyJO/relyvo-server-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/RaffyJO/relyvo-server-sdk/issues"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

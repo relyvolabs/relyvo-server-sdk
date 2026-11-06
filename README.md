@@ -16,6 +16,29 @@ your backend ──(rv_ API key)──► Relyvo API    ──► video particip
 your browser ──(short-lived token)──► LiveKit / Centrifugo
 ```
 
+## Install
+
+**Go**
+
+```bash
+go get github.com/RaffyJO/relyvo-server-sdk/sdk-go@v0.1.0
+```
+
+The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bare
+`vX.Y.Z` tag will not resolve.
+
+**TypeScript / Node 18+**
+
+```bash
+npm install relyvo-server-sdk
+# or: pnpm add relyvo-server-sdk
+```
+
+Both require the repository to be public. For a private fork, set
+`GOPRIVATE=github.com/RaffyJO/relyvo-server-sdk` for Go (with a configured git
+credential), and install the TypeScript package from a tarball or a private
+registry instead of npmjs.
+
 ## Packages
 
 | Path | Language | Import | Status |
