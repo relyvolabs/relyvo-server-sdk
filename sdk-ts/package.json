@@ -31,12 +31,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RaffyJO/relyvo-server-sdk.git",
+    "url": "git+https://github.com/relyvolabs/relyvo-server-sdk.git",
     "directory": "sdk-ts"
   },
-  "homepage": "https://github.com/RaffyJO/relyvo-server-sdk#readme",
+  "homepage": "https://github.com/relyvolabs/relyvo-server-sdk#readme",
   "bugs": {
-    "url": "https://github.com/RaffyJO/relyvo-server-sdk/issues"
+    "url": "https://github.com/relyvolabs/relyvo-server-sdk/issues"
   },
   "scripts": {
     "build": "tsup",

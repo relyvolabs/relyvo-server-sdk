@@ -21,7 +21,7 @@ your browser ──(short-lived token)──► LiveKit / Centrifugo
 **Go**
 
 ```bash
-go get github.com/RaffyJO/relyvo-server-sdk/sdk-go@v0.1.0
+go get github.com/relyvolabs/relyvo-server-sdk/sdk-go@v0.1.0
 ```
 
 The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bare
@@ -35,7 +35,7 @@ npm install relyvo-server-sdk
 ```
 
 Both require the repository to be public. For a private fork, set
-`GOPRIVATE=github.com/RaffyJO/relyvo-server-sdk` for Go (with a configured git
+`GOPRIVATE=github.com/relyvolabs/relyvo-server-sdk` for Go (with a configured git
 credential), and install the TypeScript package from a tarball or a private
 registry instead of npmjs.
 
@@ -43,7 +43,7 @@ registry instead of npmjs.
 
 | Path | Language | Import | Status |
 | --- | --- | --- | --- |
-| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/RaffyJO/relyvo-server-sdk/sdk-go` | 0.1.0 |
+| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.1.0 |
 | [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `relyvo-server-sdk` | 0.1.0 |
 | [`spec/`](spec) | — | Vendored contracts + conformance fixtures | — |
 | [`examples/`](examples) | Go, TypeScript | Minimal servers | — |

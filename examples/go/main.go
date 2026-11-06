@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	relyvo "github.com/RaffyJO/relyvo-server-sdk/sdk-go"
+	relyvo "github.com/relyvolabs/relyvo-server-sdk/sdk-go"
 )
 
 func main() {

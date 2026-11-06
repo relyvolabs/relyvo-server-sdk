@@ -1,3 +1,3 @@
-module github.com/RaffyJO/relyvo-server-sdk/sdk-go
+module github.com/relyvolabs/relyvo-server-sdk/sdk-go
 
 go 1.22
