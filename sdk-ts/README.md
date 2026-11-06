@@ -1,4 +1,4 @@
-# relyvo-server-sdk (Node)
+# @relyvolabs/server-sdk
 
 Official TypeScript/Node server SDK for the Relyvo platform. It exchanges an API
 key for the short-lived credentials a browser needs: a LiveKit participant token
@@ -8,7 +8,7 @@ and a chat end-user token.
 > unless `allowBrowser: true` is passed, because a bundled key is a leaked key.
 
 ```ts
-import { Relyvo } from "relyvo-server-sdk";
+import { Relyvo } from "@relyvolabs/server-sdk";
 
 const relyvo = new Relyvo({
   apiKey: process.env.RELYVO_API_KEY!,

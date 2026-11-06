@@ -9,7 +9,7 @@
  *
  * Tokens are masked by default. Pass --show-token only for a local hand-off.
  */
-import { Relyvo, isRelyvoError } from "relyvo-server-sdk";
+import { Relyvo, isRelyvoError } from "@relyvolabs/server-sdk";
 
 const showToken = process.argv.includes("--show-token");
 

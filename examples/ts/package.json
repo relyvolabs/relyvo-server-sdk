@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "relyvo-server-sdk": "workspace:*"
+    "@relyvolabs/server-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

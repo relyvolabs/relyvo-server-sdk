@@ -30,8 +30,8 @@ The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bar
 **TypeScript / Node 18+**
 
 ```bash
-npm install relyvo-server-sdk
-# or: pnpm add relyvo-server-sdk
+npm install @relyvolabs/server-sdk
+# or: pnpm add @relyvolabs/server-sdk
 ```
 
 Both require the repository to be public. For a private fork, set
@@ -44,7 +44,7 @@ registry instead of npmjs.
 | Path | Language | Import | Status |
 | --- | --- | --- | --- |
 | [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.1.0 |
-| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `relyvo-server-sdk` | 0.1.0 |
+| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `@relyvolabs/server-sdk` | 0.1.0 |
 | [`spec/`](spec) | — | Vendored contracts + conformance fixtures | — |
 | [`examples/`](examples) | Go, TypeScript | Minimal servers | — |
 
@@ -89,7 +89,7 @@ video, err := client.Video.CreateToken(ctx, relyvo.VideoTokenInput{
 ## Quick start (TypeScript)
 
 ```ts
-import { Relyvo } from "relyvo-server-sdk";
+import { Relyvo } from "@relyvolabs/server-sdk";
 
 const relyvo = new Relyvo({
   apiKey: process.env.RELYVO_API_KEY!,

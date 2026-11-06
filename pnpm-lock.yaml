@@ -10,7 +10,7 @@ importers:
 
   examples/ts:
     dependencies:
-      relyvo-server-sdk:
+      '@relyvolabs/server-sdk':
         specifier: workspace:*
         version: link:../../sdk-ts
     devDependencies:

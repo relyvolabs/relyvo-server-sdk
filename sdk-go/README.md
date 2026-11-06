@@ -1,4 +1,4 @@
-# relyvo-server-sdk (Go)
+# Relyvo Server SDK (Go)
 
 Official Go server SDK for the Relyvo platform. It exchanges an API key for the
 short-lived credentials a browser needs: a LiveKit participant token and a chat
