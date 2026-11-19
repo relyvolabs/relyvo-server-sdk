@@ -144,6 +144,7 @@ export class Transport {
           response.status,
           text,
           parseRetryAfter(response.headers.get("retry-after")),
+          response.headers.get("x-request-id"),
         );
       }
 

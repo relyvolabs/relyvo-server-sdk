@@ -14,3 +14,6 @@
   when it is exceeded, allowing default-sized Chat pages to be decoded.
 - Clarify that zero `MaxRetries` selects the default and a negative value
   disables retries; existing behavior is unchanged.
+- Validate user-scoped Chat actors as internal UUID-shaped IDs, matching the
+  TypeScript SDK. Callers must still independently authorize the actor; external
+  IDs previously accepted by the Go SDK are now rejected.

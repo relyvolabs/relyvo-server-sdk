@@ -87,6 +87,22 @@ describe("bounded response bodies", () => {
 });
 
 describe("error formatting", () => {
+  it.each([
+    [{ error: { code: "bad", request_id: "nested" }, request_id: "top" }, "header", "nested"],
+    [{ error: { code: "bad", request_id: "" }, request_id: "top" }, "header", "top"],
+    [{ error: { code: "bad", request_id: 12 }, request_id: null }, "header", "header"],
+    [{ error: { code: "bad" } }, "", undefined],
+    [{ error: { code: "bad" } }, undefined, undefined],
+    ["not JSON", "header", "header"],
+    [{ request_id: "top" }, "header", "top"],
+  ])("selects a request ID from body before header (%j)", async (body, header, expected) => {
+    const mock = mockFetch(() => jsonResponse(body, 400, header === undefined ? {} : { "X-Request-Id": header }));
+    await expect(new Relyvo({ ...config, fetch: mock.fetch }).whoami()).rejects.toMatchObject({
+      status: 400, requestId: expected,
+    });
+    expect(mock.calls).toHaveLength(1);
+  });
+
   it("keeps the code, message, status and request id", async () => {
     const double = mockFetch(() =>
       jsonResponse(

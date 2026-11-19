@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -43,12 +44,15 @@ func chatQuery(path string, q url.Values) string {
 	return path
 }
 
+var chatActorUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 func (s *ChatService) userCall(ctx context.Context, actor ChatActor, method, path string, body, out any, retry bool) error {
+	actor.UserID = strings.TrimSpace(actor.UserID)
+	if !chatActorUUID.MatchString(actor.UserID) {
+		return errors.New("relyvo: ChatActor.UserID must be an internal chat user UUID")
+	}
 	if err := s.client.requireChat(); err != nil {
 		return err
-	}
-	if strings.TrimSpace(actor.UserID) == "" {
-		return errors.New("relyvo: ChatActor.UserID is required")
 	}
 	var envelope struct {
 		Data any `json:"data"`

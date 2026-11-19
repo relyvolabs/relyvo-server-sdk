@@ -105,7 +105,7 @@ export function parseRetryAfter(value: string | null): number {
 }
 
 /** Maps a non-2xx response body onto a RelyvoError. */
-export function toRelyvoError(status: number, body: string, retryAfterMs = 0): RelyvoError {
+export function toRelyvoError(status: number, body: string, retryAfterMs = 0, headerRequestId?: string | null): RelyvoError {
   let envelope: ErrorEnvelope | undefined;
   try {
     const parsed: unknown = JSON.parse(body);
@@ -116,12 +116,14 @@ export function toRelyvoError(status: number, body: string, retryAfterMs = 0): R
     envelope = undefined;
   }
 
+  const requestId = firstString(envelope?.error?.request_id, envelope?.request_id, headerRequestId);
+
   // Realtime reports an ambiguous single publish as a top-level result, not
   // the usual error envelope. Preserve its event ID and uncertainty for callers.
   if (status === 503 && envelope && (envelope as Record<string, unknown>)["outcome"] === "unknown" && (envelope as Record<string, unknown>)["error_code"] === "publish_outcome_unknown") {
     const result = envelope as Record<string, unknown>;
     return new RelyvoError(firstString(result["error"]) ?? "The publish outcome is unknown", {
-      status, code: "publish_outcome_unknown", details: result, retryAfterMs,
+      status, code: "publish_outcome_unknown", details: result, requestId, retryAfterMs,
     });
   }
 
@@ -130,12 +132,12 @@ export function toRelyvoError(status: number, body: string, retryAfterMs = 0): R
     return new RelyvoError(`the service returned HTTP ${status}`, {
       status,
       code: "unexpected_response",
+      requestId,
       retryAfterMs,
     });
   }
 
   const message = firstString(envelope?.error?.message) ?? `HTTP ${status}`;
-  const requestId = firstString(envelope?.error?.request_id, envelope?.request_id);
 
   return new RelyvoError(message, {
     status,

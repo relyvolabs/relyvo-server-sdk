@@ -90,7 +90,9 @@ failed and unknown outcomes. For an ambiguous single publish the SDK throws a
 retrying may duplicate an event.
 
 Errors are `RelyvoError` with `status`, `code`, `message`, `requestId` and
-`retryable`. Configuration problems are `RelyvoConfigError`. Both are exported, as
+`retryable`. For HTTP errors, `requestId` uses a non-empty body request ID first
+(nested before top-level), then the `X-Request-Id` response header if available.
+Configuration problems are `RelyvoConfigError`. Both are exported, as
 are `isRelyvoError` and `isRelyvoConfigError`.
 
 Retries apply to idempotent calls only (`whoami`, `video.config`, `chat.upsertUser`,

@@ -52,6 +52,13 @@ and applies its membership and role checks. Your backend must authorize the
 caller to act for that user; never accept an arbitrary actor from a browser
 without checking it. These calls use `ChatURL`, not `RealtimeURL`.
 
+As of the unreleased 0.2.0 SDK, user-scoped Chat calls validate the actor as a
+hyphenated internal UUID (case-insensitive, with surrounding whitespace trimmed)
+first and make no HTTP request for invalid values. External IDs that previously
+passed through may now be rejected; resolve them with a trusted `UpsertUser` or
+`GetUser` and use the returned internal `User.ID` instead. UUID format validation
+cannot establish that an ID is internal or that the caller is authorized.
+
 ```go
 actor := relyvo.ChatActor{UserID: chatUserID}
 channel, err := client.Chat.CreateChannel(ctx, actor, relyvo.ChatChannelInput{

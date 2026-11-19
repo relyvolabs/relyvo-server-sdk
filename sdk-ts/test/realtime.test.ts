@@ -29,12 +29,17 @@ describe("Realtime project-key API", () => {
     expect(result.unknown).toBe(1);
   });
   it("preserves the 503 unknown publish result and does not retry any writes", async () => {
-    const mock = mockFetch(() => jsonResponse({ event_id: "e", channel: "a", event: "update", outcome: "unknown", error_code: "publish_outcome_unknown", error: "may duplicate" }, 503));
+    const mock = mockFetch(() => jsonResponse({ event_id: "e", channel: "a", event: "update", outcome: "unknown", error_code: "publish_outcome_unknown", error: "The publish outcome is unknown; retrying may publish a duplicate." }, 503, { "X-Request-Id": "req_publish" }));
     const sdk = client(mock.fetch);
-    await expect(sdk.realtime.publish({ channel: "a", event: "update", data: null })).rejects.toMatchObject({ status: 503, code: "publish_outcome_unknown", retryable: false, details: { event_id: "e", outcome: "unknown" } });
+    await expect(sdk.realtime.publish({ channel: "a", event: "update", data: null })).rejects.toMatchObject({ status: 503, code: "publish_outcome_unknown", message: "The publish outcome is unknown; retrying may publish a duplicate.", requestId: "req_publish", retryable: false, details: { event_id: "e", channel: "a", event: "update", outcome: "unknown", error_code: "publish_outcome_unknown" } });
     await expect(sdk.realtime.publishBatch([])).rejects.toBeInstanceOf(RelyvoError);
     await expect(sdk.realtime.createClientToken({ userId: "u", channels: ["a"] })).rejects.toBeInstanceOf(RelyvoError);
     expect(mock.calls).toHaveLength(3);
+  });
+  it("prefers a body request ID over the header for unknown publish results", async () => {
+    const mock = mockFetch(() => jsonResponse({ event_id: "e", channel: "a", event: "update", outcome: "unknown", error_code: "publish_outcome_unknown", error: "unknown", request_id: "body-id" }, 503, { "X-Request-Id": "header-id" }));
+    await expect(client(mock.fetch).realtime.publish({ channel: "a", event: "update", data: null })).rejects.toMatchObject({ requestId: "body-id", code: "publish_outcome_unknown", retryable: false });
+    expect(mock.calls).toHaveLength(1);
   });
   it("encodes receipt pagination, retries reads, and carries signal", async () => {
     const controller = new AbortController();

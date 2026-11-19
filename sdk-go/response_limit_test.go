@@ -20,7 +20,7 @@ func TestResponseLimit(t *testing.T) {
 	}))
 	defer server.Close()
 	c := newTestClient(t, "http://example.test", server.URL)
-	page, err := c.Chat.ListMessages(context.Background(), ChatActor{UserID: "actor"}, "c", ChatMessagePageOptions{})
+	page, err := c.Chat.ListMessages(context.Background(), ChatActor{UserID: "123e4567-e89b-12d3-a456-426614174000"}, "c", ChatMessagePageOptions{})
 	if err != nil || len(page.Items) != 1 || len(page.Items[0].Content) != (1<<20)+1 {
 		t.Fatalf("large page error: %v", err)
 	}

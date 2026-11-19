@@ -13,7 +13,7 @@ func TestChatUserResources(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.Header.Get("Authorization") != "Bearer rv_test_key_secret" || r.Header.Get("X-Relyvo-Chat-User-ID") != "actor" {
+		if r.Header.Get("Authorization") != "Bearer rv_test_key_secret" || r.Header.Get("X-Relyvo-Chat-User-ID") != "123e4567-e89b-12d3-a456-426614174000" {
 			t.Error("incorrect authorization")
 		}
 		switch r.URL.Path {
@@ -71,7 +71,7 @@ func TestChatUserResources(t *testing.T) {
 	}))
 	defer server.Close()
 	c := newTestClient(t, "http://example.test", server.URL)
-	a := ChatActor{UserID: "actor"}
+	a := ChatActor{UserID: "123e4567-e89b-12d3-a456-426614174000"}
 	ctx := context.Background()
 	channel, err := c.Chat.CreateChannel(ctx, a, ChatChannelInput{Name: "Team"})
 	if err != nil || !channel.Created || channel.Channel.ID != "c" {
@@ -122,11 +122,36 @@ func TestChatUserResources(t *testing.T) {
 	}
 }
 
+func TestChatActorUUIDValidation(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if got := r.Header.Get("X-Relyvo-Chat-User-ID"); got != "123E4567-E89B-12D3-A456-426614174000" {
+			t.Errorf("actor header = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":{"id":"c"}}`))
+	}))
+	defer server.Close()
+	c := newTestClient(t, "http://example.test", server.URL)
+	for _, id := range []string{"", " ", "external-user", "123e4567e89b12d3a456426614174000", "123e4567-e89b-12d3-a456-42661417400g", "{123e4567-e89b-12d3-a456-426614174000}", "123e4567-e89b-12d3-a456-426614174000\nextra"} {
+		t.Run(id, func(t *testing.T) {
+			_, err := c.Chat.GetChannel(context.Background(), ChatActor{UserID: id}, "c")
+			if err == nil || calls.Load() != 0 {
+				t.Fatalf("invalid actor error = %v, calls = %d", err, calls.Load())
+			}
+		})
+	}
+	_, err := c.Chat.GetChannel(context.Background(), ChatActor{UserID: " 123E4567-E89B-12D3-A456-426614174000 "}, "c")
+	if err != nil || calls.Load() != 1 {
+		t.Fatalf("valid actor error = %v, calls = %d", err, calls.Load())
+	}
+}
+
 func TestChatUserAuthErrorsAndRetries(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Header.Get("X-Relyvo-Chat-User-ID") != "actor" {
+		if r.Header.Get("X-Relyvo-Chat-User-ID") != "123e4567-e89b-12d3-a456-426614174000" {
 			t.Error("missing actor")
 		}
 		w.WriteHeader(503)
@@ -134,7 +159,7 @@ func TestChatUserAuthErrorsAndRetries(t *testing.T) {
 	}))
 	defer server.Close()
 	c := newTestClient(t, "http://example.test", server.URL)
-	a := ChatActor{UserID: "actor"}
+	a := ChatActor{UserID: "123e4567-e89b-12d3-a456-426614174000"}
 	_, err := c.Chat.CreateChannel(context.Background(), a, ChatChannelInput{})
 	api, ok := AsError(err)
 	if !ok || api.Code != "unavailable" || api.RequestID != "req" || calls.Load() != 1 {
