@@ -1,4 +1,5 @@
 import { asMetadata, asOptionalText, asRecord, asText, asTimestamp } from "./decode.js";
+import { ChatScopedAPI } from "./chat-scoped.js";
 import { RelyvoConfigError } from "./errors.js";
 import { joinUrl, type Transport } from "./transport.js";
 import type {
@@ -7,6 +8,8 @@ import type {
   ChatUserInput,
   ChatUserResult,
   ChatUserToken,
+  ChatUserTokenOptions,
+  ChatUserUpdate,
 } from "./types.js";
 
 /**
@@ -17,11 +20,11 @@ import type {
  * authenticates with the Relyvo API key, which chat validates against the control
  * plane.
  */
-export class ChatAPI {
+export class ChatAPI extends ChatScopedAPI {
   constructor(
     private readonly transport: Transport,
     private readonly chatUrl: string | undefined,
-  ) {}
+  ) { super(transport, chatUrl); }
 
   /**
    * Creates or updates a chat user.
@@ -58,12 +61,32 @@ export class ChatAPI {
     };
   }
 
+  /** Get a project-scoped chat user by its internal ID. */
+  async getUser(userId: string, options: CallOptions = {}): Promise<ChatUser> {
+    const id = userId?.trim() ?? "";
+    if (!id) throw new TypeError("relyvo: userId is required");
+    const raw = await this.transport.send({ method: "GET", url: joinUrl(this.requireBase(), `/v1/chat/users/${encodeURIComponent(id)}`), retryable: true, signal: options.signal });
+    return this.toUser(asRecord(asRecord(raw, "chat.user")["data"], "chat.user.data"));
+  }
+
+  /** Update a profile; omitted fields stay unchanged, and empty strings are sent. */
+  async updateUser(userId: string, input: ChatUserUpdate, options: CallOptions = {}): Promise<ChatUser> {
+    const id = userId?.trim() ?? "";
+    if (!id) throw new TypeError("relyvo: userId is required");
+    const raw = await this.transport.send({ method: "PATCH", url: joinUrl(this.requireBase(), `/v1/chat/users/${encodeURIComponent(id)}`), body: {
+      ...(input.displayName === undefined ? {} : { display_name: input.displayName }),
+      ...(input.avatarUrl === undefined ? {} : { avatar_url: input.avatarUrl }),
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    }, retryable: false, signal: options.signal });
+    return this.toUser(asRecord(asRecord(raw, "chat.user")["data"], "chat.user.data"));
+  }
+
   /**
    * Mints a short-lived end-user token.
    *
    * Never retried automatically: a retry would mint a second token.
    */
-  async createUserToken(userId: string, options: CallOptions = {}): Promise<ChatUserToken> {
+  async createUserToken(userId: string, options: ChatUserTokenOptions = {}): Promise<ChatUserToken> {
     const id = userId?.trim() ?? "";
     if (id === "") {
       throw new TypeError("relyvo: userId is required");
@@ -72,7 +95,7 @@ export class ChatAPI {
     const raw = await this.transport.send({
       method: "POST",
       url: joinUrl(this.requireBase(), `/v1/chat/users/${encodeURIComponent(id)}/tokens`),
-      body: {},
+      body: options.ttlSeconds === undefined ? {} : { ttl_seconds: options.ttlSeconds },
       retryable: false,
       signal: options.signal,
     });

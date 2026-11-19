@@ -106,6 +106,18 @@ func (s *ChatService) UpsertUser(ctx context.Context, in ChatUserInput) (*ChatUs
 // Not retried automatically: a retry would mint a second token. Tokens are cheap,
 // so asking again is the right recovery.
 func (s *ChatService) CreateUserToken(ctx context.Context, userID string) (*ChatUserToken, error) {
+	return s.CreateUserTokenWithOptions(ctx, userID, ChatUserTokenOptions{})
+}
+
+// ChatUserTokenOptions optionally requests a shorter token lifetime in seconds.
+// The service caps positive values at its configured maximum; zero uses that maximum.
+type ChatUserTokenOptions struct {
+	TTLSeconds int `json:"ttl_seconds,omitempty"`
+}
+
+// CreateUserTokenWithOptions mints a token with an optional requested lifetime.
+// Like CreateUserToken, it is never retried automatically.
+func (s *ChatService) CreateUserTokenWithOptions(ctx context.Context, userID string, options ChatUserTokenOptions) (*ChatUserToken, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("relyvo: userID is required")
 	}
@@ -121,13 +133,46 @@ func (s *ChatService) CreateUserToken(ctx context.Context, userID string) (*Chat
 		method:    http.MethodPost,
 		base:      s.client.chatURL,
 		path:      "/v1/chat/users/" + url.PathEscape(userID) + "/tokens",
-		body:      map[string]any{},
+		body:      options,
 		out:       &envelope,
 		retryable: false,
 	}); err != nil {
 		return nil, err
 	}
 
+	return &envelope.Data, nil
+}
+
+// ChatUserUpdate specifies fields to update; pointers allow setting empty strings.
+type ChatUserUpdate struct {
+	DisplayName *string        `json:"display_name,omitempty"`
+	AvatarURL   *string        `json:"avatar_url,omitempty"`
+	Metadata    map[string]any `json:"metadata"`
+}
+
+// GetUser reads a project-scoped chat user by its chat user ID.
+func (s *ChatService) GetUser(ctx context.Context, userID string) (*ChatUser, error) {
+	return s.userByID(ctx, http.MethodGet, userID, nil, true)
+}
+
+// UpdateUser updates a project-scoped chat user; it is not automatically retried.
+func (s *ChatService) UpdateUser(ctx context.Context, userID string, in ChatUserUpdate) (*ChatUser, error) {
+	return s.userByID(ctx, http.MethodPatch, userID, in, false)
+}
+
+func (s *ChatService) userByID(ctx context.Context, method, userID string, body any, retryable bool) (*ChatUser, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("relyvo: userID is required")
+	}
+	if err := s.client.requireChat(); err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Data ChatUser `json:"data"`
+	}
+	if err := s.client.do(ctx, request{method: method, base: s.client.chatURL, path: "/v1/chat/users/" + url.PathEscape(userID), body: body, out: &envelope, retryable: retryable}); err != nil {
+		return nil, err
+	}
 	return &envelope.Data, nil
 }
 

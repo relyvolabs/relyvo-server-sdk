@@ -21,7 +21,9 @@ const (
 
 	// maxResponseBytes bounds what the SDK will read from one response. An error
 	// page from a proxy must never be able to exhaust a server's memory.
-	maxResponseBytes = 1 << 20
+	// Allow full default-sized chat pages, including JSON escaping, while still
+	// bounding memory even if a server or proxy sends an oversized response.
+	maxResponseBytes = 16 << 20
 
 	// maxRetryDelay caps a single backoff, including a hostile Retry-After.
 	maxRetryDelay = 30 * time.Second
@@ -31,6 +33,7 @@ const (
 //
 // APIKey and APIURL are required. ChatURL is required only when chat methods are
 // used; without it they return ErrNotConfigured instead of guessing an origin.
+// RealtimeURL is likewise required only for Realtime methods.
 type Config struct {
 	// APIKey is the project API key, `rv_<keyID>_<secret>`. Server-side only.
 	APIKey string
@@ -44,6 +47,9 @@ type Config struct {
 	// ChatURL is the chat service origin, for chat methods.
 	ChatURL string
 
+	// RealtimeURL is the Realtime data-plane origin. Required for Realtime methods.
+	RealtimeURL string
+
 	// HTTPClient is optional. When set, Timeout is ignored and the supplied
 	// client's own configuration is respected.
 	HTTPClient *http.Client
@@ -52,7 +58,7 @@ type Config struct {
 	Timeout time.Duration
 
 	// MaxRetries is the number of *additional* attempts for idempotent calls.
-	// Defaults to 2; zero means one attempt only.
+	// Zero uses the default of 2; a negative value disables retries.
 	MaxRetries int
 
 	// BaseDelay is the first backoff step. Defaults to 200ms. Tests set it low.
@@ -65,18 +71,23 @@ type Config struct {
 
 // Client is safe for concurrent use by multiple goroutines.
 type Client struct {
-	apiKey     string
-	apiURL     string
-	chatURL    string
-	http       *http.Client
-	maxRetries int
-	baseDelay  time.Duration
-	userAgent  string
+	apiKey      string
+	apiURL      string
+	chatURL     string
+	realtimeURL string
+	http        *http.Client
+	maxRetries  int
+	baseDelay   time.Duration
+	userAgent   string
 
 	// Video mints media credentials.
 	Video *VideoService
 	// Chat manages chat identities and tokens.
 	Chat *ChatService
+	// Call is an alias of Video, retained alongside the existing Video surface.
+	Call *VideoService
+	// Realtime uses the standalone Realtime project-key API.
+	Realtime *RealtimeService
 }
 
 // New validates the configuration and builds a client.
@@ -94,6 +105,11 @@ func New(cfg Config) (*Client, error) {
 		return nil, err
 	}
 	chatURL, err := normalizeBaseURL("ChatURL", cfg.ChatURL, false)
+	if err != nil {
+		return nil, err
+	}
+
+	realtimeURL, err := normalizeBaseURL("RealtimeURL", cfg.RealtimeURL, false)
 	if err != nil {
 		return nil, err
 	}
@@ -126,16 +142,19 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	client := &Client{
-		apiKey:     apiKey,
-		apiURL:     apiURL,
-		chatURL:    chatURL,
-		http:       httpClient,
-		maxRetries: maxRetries,
-		baseDelay:  baseDelay,
-		userAgent:  agent,
+		apiKey:      apiKey,
+		apiURL:      apiURL,
+		chatURL:     chatURL,
+		realtimeURL: realtimeURL,
+		http:        httpClient,
+		maxRetries:  maxRetries,
+		baseDelay:   baseDelay,
+		userAgent:   agent,
 	}
 	client.Video = &VideoService{client: client}
 	client.Chat = &ChatService{client: client}
+	client.Call = client.Video
+	client.Realtime = &RealtimeService{client: client}
 
 	return client, nil
 }
@@ -170,6 +189,7 @@ type request struct {
 	body      any
 	out       any
 	retryable bool
+	chatActor string
 }
 
 // do executes a request, retrying only when the call is idempotent and the
@@ -224,6 +244,9 @@ func (c *Client) send(ctx context.Context, req request, payload []byte) ([]byte,
 	}
 
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if req.chatActor != "" {
+		httpReq.Header.Set("X-Relyvo-Chat-User-ID", req.chatActor)
+	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", c.userAgent)
 	if payload != nil {
@@ -238,16 +261,28 @@ func (c *Client) send(ctx context.Context, req request, payload []byte) ([]byte,
 		_ = response.Body.Close()
 	}()
 
-	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, &Error{Code: "transport_error", Message: err.Error(), err: err}
+	}
+
+	if len(raw) > maxResponseBytes {
+		return nil, ErrResponseTooLarge
 	}
 
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return raw, nil
 	}
 
-	return nil, newAPIError(response, raw)
+	apiErr := newAPIError(response, raw)
+	if req.method == http.MethodPost && req.path == "/v1/realtime/events" && response.StatusCode == http.StatusServiceUnavailable {
+		var result RealtimePublishResult
+		if json.Unmarshal(raw, &result) == nil && result.Outcome == "unknown" && result.ErrorCode == "publish_outcome_unknown" {
+			apiErr.Code, apiErr.Message, apiErr.RealtimePublish = result.ErrorCode, result.Error, &result
+			apiErr.RequestID = response.Header.Get("X-Request-Id")
+		}
+	}
+	return nil, apiErr
 }
 
 // delay computes the wait before the next attempt: exponential with jitter, and

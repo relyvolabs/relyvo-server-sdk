@@ -92,7 +92,7 @@ describe("whoami", () => {
       Authorization: "Bearer rv_key_secret",
       Accept: "application/json",
     });
-    expect(double.headers(0)["User-Agent"]).toMatch(/^relyvo-server-sdk-node\/0\.1\.0/);
+    expect(double.headers(0)["User-Agent"]).toBe("relyvo-server-sdk-node/0.2.0");
     expect(info.projectId).toBe("8c1e4b62-7d5a-4f39-9a11-2e3f4a5b6c7d");
     expect(info.scopes).toEqual(["video:write"]);
   });

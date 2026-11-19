@@ -38,6 +38,7 @@ export class RelyvoError extends Error {
    * call: the caller still decides whether the operation is safe to repeat.
    */
   get retryable(): boolean {
+    if (this.code === "publish_outcome_unknown") return false;
     if (this.status === 0) {
       return this.code === "transport_error";
     }
@@ -113,6 +114,15 @@ export function toRelyvoError(status: number, body: string, retryAfterMs = 0): R
     }
   } catch {
     envelope = undefined;
+  }
+
+  // Realtime reports an ambiguous single publish as a top-level result, not
+  // the usual error envelope. Preserve its event ID and uncertainty for callers.
+  if (status === 503 && envelope && (envelope as Record<string, unknown>)["outcome"] === "unknown" && (envelope as Record<string, unknown>)["error_code"] === "publish_outcome_unknown") {
+    const result = envelope as Record<string, unknown>;
+    return new RelyvoError(firstString(result["error"]) ?? "The publish outcome is unknown", {
+      status, code: "publish_outcome_unknown", details: result, retryAfterMs,
+    });
   }
 
   const code = firstString(envelope?.error?.code);

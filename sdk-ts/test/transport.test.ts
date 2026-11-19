@@ -55,6 +55,37 @@ describe("cancellation", () => {
   });
 });
 
+describe("bounded response bodies", () => {
+  it.each([undefined, "10"])("rejects chunked oversized bodies despite content-length %s", async (length) => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(10_000_000)); controller.enqueue(new Uint8Array(7_000_000)); },
+      cancel() { cancelled = true; },
+    });
+    const double = mockFetch(() => new Response(stream, { status: 200, headers: length === undefined ? {} : { "content-length": length } }));
+    await expect(new Relyvo({ ...config, fetch: double.fetch }).whoami()).rejects.toMatchObject({ code: "unexpected_response" });
+    expect(double.calls).toHaveLength(1);
+    expect(cancelled).toBe(true);
+  });
+  it("accepts a representative default 100-message page larger than 1 MiB", async () => {
+    const item = { id: "m", organization_id: "o", project_id: "p", channel_id: "c", sender_id: "u", channel_seq: 1, type: "text", content: "x".repeat(8192), metadata: { value: "y".repeat(4000) }, created_at: "2026-01-01T00:00:00Z" };
+    const data = { data: { items: Array.from({ length: 100 }, (_, index) => ({ ...item, channel_seq: index + 1 })), has_more: false } };
+    expect(new TextEncoder().encode(JSON.stringify(data)).length).toBeGreaterThan(1 << 20);
+    const double = mockFetch(() => jsonResponse(data));
+    const page = await new Relyvo({ ...config, chatUrl: "https://chat.example.com", fetch: double.fetch }).chat.listMessages("11111111-1111-4111-8111-111111111111", "channel");
+    expect(page.items).toHaveLength(100);
+    expect(page.items[99]?.channel_seq).toBe(100);
+    expect(page.items[0]?.content).toHaveLength(8192);
+  });
+  it("decodes UTF-8 split across chunks", async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ api_key: { id: "é", project_id: "p" } }));
+    const pos = bytes.indexOf(0xc3);
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes.slice(0, pos + 1)); c.enqueue(bytes.slice(pos + 1)); c.close(); } });
+    const double = mockFetch(() => new Response(stream));
+    expect((await new Relyvo({ ...config, fetch: double.fetch }).whoami()).id).toBe("é");
+  });
+});
+
 describe("error formatting", () => {
   it("keeps the code, message, status and request id", async () => {
     const double = mockFetch(() =>

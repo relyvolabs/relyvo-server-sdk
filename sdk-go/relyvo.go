@@ -21,7 +21,7 @@ package relyvo
 
 // Version is the SDK release. It is part of the User-Agent so a service can
 // attribute traffic to a client version without asking.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // userAgent is what every request sends.
 const userAgent = "relyvo-server-sdk-go/" + Version

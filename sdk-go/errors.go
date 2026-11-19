@@ -14,6 +14,12 @@ import (
 // It is a configuration error, not a transient one: it is never retried.
 var ErrNotConfigured = errors.New("relyvo: chat is not configured; set Config.ChatURL")
 
+// ErrResponseTooLarge indicates that the response exceeded the SDK's bounded read limit.
+var ErrResponseTooLarge = errors.New("relyvo: response exceeds 16 MiB limit")
+
+// ErrRealtimeNotConfigured indicates Config.RealtimeURL is missing.
+var ErrRealtimeNotConfigured = errors.New("relyvo: realtime is not configured; set Config.RealtimeURL")
+
 // Error is a failed Relyvo call.
 //
 // StatusCode is 0 when the request never completed (DNS, connection, timeout,
@@ -34,6 +40,10 @@ type Error struct {
 
 	// Details carries the service's optional structured detail.
 	Details any
+
+	// RealtimePublish is set for the Realtime API's explicit unknown publish
+	// outcome. The event may have been published; retrying can duplicate it.
+	RealtimePublish *RealtimePublishResult
 
 	// RetryAfter is what the service asked for, when it said.
 	RetryAfter time.Duration
@@ -86,6 +96,9 @@ func (e *Error) Unwrap() error { return e.err }
 // operation itself is safe to repeat.
 func (e *Error) Retryable() bool {
 	if e == nil {
+		return false
+	}
+	if e.RealtimePublish != nil && e.RealtimePublish.Outcome == "unknown" {
 		return false
 	}
 	if e.StatusCode == 0 {

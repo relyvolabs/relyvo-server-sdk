@@ -1,19 +1,19 @@
 # Relyvo Server SDK
 
-Official server-side SDKs for the Relyvo platform, in Go and TypeScript. They
-exist for one job: a trusted backend exchanges its **Relyvo API key** for the
-short-lived credentials a browser needs — a video call participant token and a
-chat end-user token — without a dashboard session and without ever shipping the
-API key to the client.
+Official server-side SDKs for the Relyvo platform, in Go and TypeScript. A
+trusted backend uses its **Relyvo project API key** for Call credentials, Chat
+operations and Realtime publishing/credentials. Short-lived tokens are sent to
+the browser; the API key itself is never shipped to a client.
 
 > **The API key is a server credential.** It grants programmatic access to exactly
 > one project. It must never appear in a browser bundle, a mobile app, a public
 > repository or a log line. What a client receives is a short-lived token.
 
 ```
-your backend ──(rv_ API key)──► Relyvo API    ──► video participant token
-             ──(rv_ API key)──► Relyvo Chat   ──► chat end-user token
-your browser ──(short-lived token)──► LiveKit / Centrifugo
+your backend ──(rv_ API key)──► Relyvo API       ──► video participant token
+             ──(rv_ API key)──► Relyvo Chat      ──► chat end-user token
+             ──(rv_ API key)──► Relyvo Realtime  ──► short-lived client credentials
+your browser ──(short-lived credentials)──► LiveKit / Centrifugo
 ```
 
 ## Install
@@ -21,7 +21,8 @@ your browser ──(short-lived token)──► LiveKit / Centrifugo
 **Go**
 
 ```bash
-go get github.com/relyvolabs/relyvo-server-sdk/sdk-go@v0.1.0
+# after the prepared 0.2.0 release is authorized:
+go get github.com/relyvolabs/relyvo-server-sdk/sdk-go@v0.2.0
 ```
 
 The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bare
@@ -30,7 +31,8 @@ The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bar
 **TypeScript / Node 18+**
 
 ```bash
-npm install @relyvolabs/server-sdk
+# after the prepared 0.2.0 release is authorized:
+npm install @relyvolabs/server-sdk@0.2.0
 # or: pnpm add @relyvolabs/server-sdk
 ```
 
@@ -43,27 +45,31 @@ registry instead of npmjs.
 
 | Path | Language | Import | Status |
 | --- | --- | --- | --- |
-| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.1.0 |
-| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `@relyvolabs/server-sdk` | 0.1.0 |
+| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.2.0 prepared |
+| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `@relyvolabs/server-sdk` | 0.2.0 prepared |
 | [`spec/`](spec) | — | Vendored contracts + conformance fixtures | — |
 | [`examples/`](examples) | Go, TypeScript | Minimal servers | — |
 
-Both SDKs implement the same surface and are tested against the same fixtures, so
-they cannot drift apart silently.
+The prepared 0.2.0 packages are release-ready but not published. The latest
+published versions remain Go/npm 0.1.0. Both language surfaces are exercised by
+independent tests; see the repository-level [SDK coverage matrix](../docs/sdk-coverage.md).
 
 ## What is covered
 
 | Capability | Go | TypeScript | Endpoint |
 | --- | --- | --- | --- |
 | Resolve the key's project | ✅ | ✅ | `GET /v1/api/whoami` |
-| Public media connection details | ✅ | ✅ | `GET /v1/api/video/config` |
-| Mint a video/voice participant token | ✅ | ✅ | `POST /v1/api/video/tokens` |
-| Create or update a chat user | ✅ | ✅ | `POST {chat}/v1/chat/users` |
-| Mint a chat end-user token | ✅ | ✅ | `POST {chat}/v1/chat/users/{id}/tokens` |
+| Media configuration and participant token | ✅ | ✅ | `/v1/api/video/*` |
+| Chat users, tokens, channels, members and messages | ✅ | ✅ | `{chat}/v1/chat/*` |
+| Chat read state, typing, presence, realtime tokens and attachments | ✅ | ✅ | `{chat}/v1/chat/*` |
+| Realtime client tokens, publish, batch, receipts | ✅ | ✅ | `{realtime}/v1/realtime/*` |
+| Realtime unresolved events and monitoring | ✅ | ✅ | `{realtime}/v1/realtime/*` |
 
-Not covered yet: meetings, channels, messages, read state and attachments. The
-building blocks are typed and the transport is generic, so adding them is a
-matter of adding methods — not of reworking the client.
+`Call` is an alias of the existing `Video` service: it covers configuration and
+join-scoped participant tokens, not dashboard meeting-host lifecycle. Chat
+user-scoped calls require an explicitly authorized internal chat user ID via
+`ChatActor`/the `actor` argument. Realtime requires a separate `RealtimeURL`.
+See [docs/sdk-coverage.md](../docs/sdk-coverage.md) for status and blockers.
 
 ## Quick start (Go)
 
@@ -95,6 +101,7 @@ const relyvo = new Relyvo({
   apiKey: process.env.RELYVO_API_KEY!,
   apiUrl: "https://relyvo.example.com/api",
   chatUrl: "https://chat-api.example.com",
+  realtimeUrl: "https://realtime.example.com",
 });
 
 const video = await relyvo.video.createToken({
@@ -125,8 +132,12 @@ because the constructor receives the API key.
    The chat REST API must be reachable from your backend at `ChatURL`.
 4. **Base URLs**: `APIURL` is the origin where `/v1/api/...` resolves. Through the
    dashboard that is `https://<dashboard-host>/api`; against the API directly it
-   is `http://localhost:8080`. The SDK appends `/v1/api/...` and never rewrites
-   your prefix.
+   is `http://localhost:8080`. `ChatURL` is the Chat service origin and
+   `RealtimeURL` is the Realtime service origin. The SDK appends the versioned
+   paths and never guesses one service origin from another.
+5. **Realtime**: the project key needs the relevant Realtime scope
+   (`realtime:subscribe`, `realtime:publish`, or `realtime:read`). Minting client
+   credentials does not authorize users or channels in your application.
 
 ## Error model
 
@@ -142,12 +153,13 @@ Both SDKs map Relyvo's error envelope onto one typed error:
 | `code` | Stable machine code (`insufficient_credits`, `chat_disabled`, …) |
 | `message` | Human-readable text from the service |
 | `requestId` / `RequestID` | Correlates with server logs and support |
-| `retryable` / `Retryable()` | True for `429`, `502`, `503`, `504` and transport failures |
+| `retryable` / `Retryable()` | True for ordinary `429`, `502`, `503`, `504` and transport failures; false for an ambiguous Realtime publish whose outcome is unknown |
 
 Retry policy: only idempotent calls are retried, with exponential backoff, jitter
-and `Retry-After` support. Minting a video token and a chat token are **not**
-retried automatically, because a retry would mint a second credential; a chat user
-upsert is idempotent and is retried.
+and `Retry-After` support. Minting tokens/credentials and all message/channel
+writes are **not** retried automatically. An ambiguous Realtime publish is never
+blindly retried: the broker may already have accepted the event. Chat user upsert
+is idempotent and is retried.
 
 ## Repository layout
 
@@ -155,7 +167,7 @@ upsert is idempotent and is retried.
 spec/            vendored OpenAPI + fixtures shared by both test suites
 sdk-go/          Go module (zero runtime dependencies)
 sdk-ts/          npm package (zero runtime dependencies)
-examples/        one minimal backend per language
+examples/        per-product examples plus compile-checked call/chat/realtime snippets
 .github/         CI and release workflows
 ```
 
@@ -165,12 +177,12 @@ Each language is released independently from this repository:
 
 | SDK | Tag | Distribution |
 | --- | --- | --- |
-| Go | `sdk-go/v0.1.0` | Go module proxy reads the tag; import path includes the directory |
-| TypeScript | `sdk-ts/v0.1.0` | `npm publish` from `sdk-ts/` |
+| Go | `sdk-go/v0.2.0` (prepared, unpublished) | Go module proxy reads the tag; import path includes the directory |
+| TypeScript | `sdk-ts/v0.2.0` (prepared, unpublished) | `npm publish` from `sdk-ts/` after authorization |
 
 Go requires the directory prefix in the tag because the module lives in a
-subdirectory of the repository. A tag named only `v0.1.0` does not work for
-`sdk-go`.
+subdirectory of the repository. A tag named only `v0.2.0` does not work for
+`sdk-go`. No tag or publication is performed by this repository state.
 
 ## Development
 

@@ -11,6 +11,7 @@ import {
 } from "./transport.js";
 import type { APIKeyInfo, CallOptions, RelyvoConfig } from "./types.js";
 import { VideoAPI } from "./video.js";
+import { RealtimeAPI } from "./realtime.js";
 
 /** True when the module was loaded somewhere that has a global window. */
 function isBrowser(): boolean {
@@ -53,6 +54,12 @@ export class Relyvo {
   /** Mints media credentials. */
   readonly video: VideoAPI;
 
+  /** Backward-compatible alias for video. */
+  readonly call: VideoAPI;
+
+  /** Project-key Realtime operations. */
+  readonly realtime: RealtimeAPI;
+
   /** Manages chat identities and tokens. */
   readonly chat: ChatAPI;
 
@@ -79,6 +86,7 @@ export class Relyvo {
 
     this.apiUrl = normalizeBaseUrl("apiUrl", config.apiUrl, true);
     const chatUrl = normalizeBaseUrl("chatUrl", config.chatUrl, false);
+    const realtimeUrl = normalizeBaseUrl("realtimeUrl", config.realtimeUrl, false);
 
     const fetchImpl = config.fetch ?? globalThis.fetch;
     if (typeof fetchImpl !== "function") {
@@ -105,6 +113,8 @@ export class Relyvo {
     });
 
     this.video = new VideoAPI(this.transport, this.apiUrl);
+    this.call = this.video;
+    this.realtime = new RealtimeAPI(this.transport, realtimeUrl || undefined);
     this.chat = new ChatAPI(this.transport, chatUrl === "" ? undefined : chatUrl);
   }
 

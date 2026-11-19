@@ -1,13 +1,15 @@
 import { RelyvoError, parseRetryAfter, toRelyvoError } from "./errors.js";
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.2.0";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_MAX_RETRIES = 2;
 export const DEFAULT_BASE_DELAY_MS = 200;
 
 const MAX_RETRY_DELAY_MS = 30_000;
-const MAX_RESPONSE_BYTES = 1 << 20;
+// Large enough for a default 100-message page even with JSON-escaped content
+// and metadata; custom deployments may need to request smaller pages.
+const MAX_RESPONSE_BYTES = 16 << 20;
 
 export interface TransportConfig {
   apiKey: string;
@@ -19,7 +21,9 @@ export interface TransportConfig {
 }
 
 export interface SendRequest {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  /** Explicit project-scoped chat actor, never a replacement for bearer auth. */
+  chatActor?: string;
   /** Absolute URL. */
   url: string;
   body?: unknown;
@@ -77,6 +81,10 @@ export class Transport {
         "User-Agent": this.config.userAgent,
       };
 
+      if (request.chatActor !== undefined) {
+        headers["X-Relyvo-Chat-User-ID"] = request.chatActor;
+      }
+
       let body: string | undefined;
       if (request.body !== undefined) {
         body = JSON.stringify(request.body);
@@ -109,6 +117,7 @@ export class Transport {
 
       const declaredLength = Number(response.headers.get("content-length") ?? "0");
       if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+        if (response.body) void response.body.cancel().catch(() => {});
         throw new RelyvoError("relyvo: the response is too large", {
           status: response.status,
           code: "unexpected_response",
@@ -117,8 +126,12 @@ export class Transport {
 
       let text: string;
       try {
-        text = await response.text();
+        text = await readBoundedResponse(response);
       } catch (cause) {
+        if (cause instanceof RelyvoError) throw cause;
+        if (request.signal?.aborted) {
+          throw new RelyvoError("relyvo: the request was aborted", { status: 0, code: "aborted", cause });
+        }
         throw new RelyvoError("relyvo: the response could not be read", {
           status: 0,
           code: "transport_error",
@@ -189,6 +202,30 @@ export class Transport {
       }
       signal?.addEventListener("abort", onAbort, { once: true });
     });
+  }
+}
+
+/** Bound actual decoded-stream bytes, even for chunked or misdeclared responses. */
+async function readBoundedResponse(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        void reader.cancel().catch(() => {});
+        throw new RelyvoError("relyvo: the response is too large", { status: response.status, code: "unexpected_response" });
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
   }
 }
 

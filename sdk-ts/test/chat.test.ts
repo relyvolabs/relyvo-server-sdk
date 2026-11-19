@@ -109,6 +109,30 @@ describe("chat.createUserToken", () => {
   });
 });
 
+describe("project-key user profile", () => {
+  it("gets and updates users with a direct data envelope", async () => {
+    const fixture = fixtureJson<{ data: { user: unknown } }>("responses/chat-user-created.json").data.user;
+    const double = mockFetch(() => jsonResponse({ data: fixture }));
+    const chat = new Relyvo({ ...config, fetch: double.fetch }).chat;
+    const user = await chat.getUser("u/id");
+    await chat.updateUser("u/id", { displayName: "", avatarUrl: "", metadata: {} });
+    expect(user.externalUserId).toBe("user_7");
+    expect(double.calls.map((c) => [c.init.method, c.url])).toEqual([["GET", "https://chat.example.com/v1/chat/users/u%2Fid"], ["PATCH", "https://chat.example.com/v1/chat/users/u%2Fid"]]);
+    expect(sentBody(double.calls[1])).toEqual({ display_name: "", avatar_url: "", metadata: {} });
+    expect(double.headers(0).Authorization).toBe("Bearer rv_key_secret");
+    expect(double.headers(0)["X-Relyvo-Chat-User-ID"]).toBeUndefined();
+  });
+  it("retries GET but not PATCH or TTL token mint", async () => {
+    const double = mockFetch(() => jsonResponse({ error: { code: "unavailable" } }, 503));
+    const chat = new Relyvo({ ...config, fetch: double.fetch }).chat;
+    await expect(chat.getUser("u")).rejects.toMatchObject({ status: 503 });
+    await expect(chat.updateUser("u", {})).rejects.toMatchObject({ status: 503 });
+    await expect(chat.createUserToken("u", { ttlSeconds: 30 })).rejects.toMatchObject({ status: 503 });
+    expect(double.calls).toHaveLength(4);
+    expect(sentBody(double.calls[3])).toEqual({ ttl_seconds: 30 });
+  });
+});
+
 describe("chat configuration", () => {
   it("fails clearly when chatUrl is absent", async () => {
     const double = mockFetch(() => jsonResponse({}));

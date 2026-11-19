@@ -13,6 +13,10 @@
  */
 
 export { Relyvo, SDK_VERSION } from "./client.js";
+export type * from "./chat-types.js";
+export { toRealtimeWebCredentials } from "./realtime-web.js";
+export type { RealtimeWebCredentials } from "./realtime-web.js";
+export type { RealtimeBatchResult, RealtimeChannelToken, RealtimeClientToken, RealtimeClientTokenInput, RealtimeEventInput, RealtimePublishResult, RealtimeReceipt, RealtimeReceiptOptions, RealtimeReceiptPage, RealtimeUnresolvedCandidate, RealtimeUnresolvedPage, RealtimeMonitoringOverview, RealtimeWindow } from "./realtime-types.js";
 export {
   RelyvoConfigError,
   RelyvoError,
@@ -27,6 +31,8 @@ export type {
   ChatUserInput,
   ChatUserResult,
   ChatUserToken,
+  ChatUserTokenOptions,
+  ChatUserUpdate,
   RelyvoConfig,
   VideoConfig,
   VideoMode,

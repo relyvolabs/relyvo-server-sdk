@@ -157,7 +157,7 @@ func TestRequestsCarryTheKeyAsBearerAndJSON(t *testing.T) {
 	if got := seen.Get("Accept"); got != "application/json" {
 		t.Fatalf("Accept = %q", got)
 	}
-	if got := seen.Get("User-Agent"); !strings.HasPrefix(got, "relyvo-server-sdk-go/0.1.0") {
+	if got := seen.Get("User-Agent"); !strings.HasPrefix(got, "relyvo-server-sdk-go/0.2.0") {
 		t.Fatalf("User-Agent = %q", got)
 	}
 }

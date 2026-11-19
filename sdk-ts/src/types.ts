@@ -19,6 +19,9 @@ export interface RelyvoConfig {
   /** Chat service origin. Required only for chat methods. */
   chatUrl?: string;
 
+  /** Realtime data-plane origin. Required only for Realtime methods. */
+  realtimeUrl?: string;
+
   /** Custom fetch, for a proxy, instrumentation or a test double. */
   fetch?: typeof globalThis.fetch;
 
@@ -79,6 +82,17 @@ export interface ChatUserInput {
   displayName?: string;
   avatarUrl?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface ChatUserUpdate {
+  displayName?: string;
+  avatarUrl?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChatUserTokenOptions extends CallOptions {
+  /** Requested lifetime in seconds; the service applies its configured maximum. */
+  ttlSeconds?: number;
 }
 
 export interface ChatUser {
