@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-11-20
+
+- Correct the published installation and release-state documentation. No API
+  changes.
+
 ## 0.2.0 — 2026-11-20
 
 - Add project-key Realtime token, publish, batch and receipt APIs and a web credential adapter.

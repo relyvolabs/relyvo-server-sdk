@@ -1,6 +1,6 @@
 {
   "name": "@relyvolabs/server-sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Official server SDK for Relyvo Call, Chat and Realtime.",
   "license": "UNLICENSED",
   "type": "module",

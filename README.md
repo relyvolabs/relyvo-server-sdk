@@ -21,7 +21,6 @@ your browser ──(short-lived credentials)──► LiveKit / Centrifugo
 **Go**
 
 ```bash
-# after the prepared 0.2.0 release is authorized:
 go get github.com/relyvolabs/relyvo-server-sdk/sdk-go@v0.2.0
 ```
 
@@ -31,8 +30,7 @@ The module lives in a subdirectory, so the version tag is `sdk-go/vX.Y.Z`. A bar
 **TypeScript / Node 18+**
 
 ```bash
-# after the prepared 0.2.0 release is authorized:
-npm install @relyvolabs/server-sdk@0.2.0
+npm install @relyvolabs/server-sdk@0.2.1
 # or: pnpm add @relyvolabs/server-sdk
 ```
 
@@ -45,14 +43,14 @@ registry instead of npmjs.
 
 | Path | Language | Import | Status |
 | --- | --- | --- | --- |
-| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.2.0 prepared |
-| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `@relyvolabs/server-sdk` | 0.2.0 prepared |
+| [`sdk-go/`](sdk-go) | Go 1.22+ | `github.com/relyvolabs/relyvo-server-sdk/sdk-go` | 0.2.0 published |
+| [`sdk-ts/`](sdk-ts) | TypeScript, Node 18+ | `@relyvolabs/server-sdk` | 0.2.1 published |
 | [`spec/`](spec) | — | Vendored contracts + conformance fixtures | — |
 | [`examples/`](examples) | Go, TypeScript | Minimal servers | — |
 
-The prepared 0.2.0 packages are release-ready but not published. The latest
-published versions remain Go/npm 0.1.0. Both language surfaces are exercised by
-independent tests; see the repository-level [SDK coverage matrix](../docs/sdk-coverage.md).
+The Go 0.2.0 and TypeScript 0.2.1 packages are published. Both language surfaces
+are exercised by independent tests; see the repository-level
+[SDK coverage matrix](../docs/sdk-coverage.md).
 
 ## What is covered
 
@@ -177,12 +175,13 @@ Each language is released independently from this repository:
 
 | SDK | Tag | Distribution |
 | --- | --- | --- |
-| Go | `sdk-go/v0.2.0` (prepared, unpublished) | Go module proxy reads the tag; import path includes the directory |
-| TypeScript | `sdk-ts/v0.2.0` (prepared, unpublished) | `npm publish` from `sdk-ts/` after authorization |
+| Go | `sdk-go/v0.2.0` (published) | Go module proxy reads the tag; import path includes the directory |
+| TypeScript | `sdk-ts/v0.2.1` (published) | `npm publish` from `sdk-ts/` after authorization |
 
 Go requires the directory prefix in the tag because the module lives in a
 subdirectory of the repository. A tag named only `v0.2.0` does not work for
-`sdk-go`. No tag or publication is performed by this repository state.
+`sdk-go`. The release workflows publish the TypeScript package from its matching
+`sdk-ts/v*` tag and verify the Go module from its `sdk-go/v*` tag.
 
 ## Development
 
