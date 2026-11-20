@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 — 2026-11-20
 
 - Add project-key Realtime token, publish, batch and receipt APIs and a web credential adapter.
 - Add explicit acting-user Chat channel, membership, message, read state, realtime and attachment APIs.
